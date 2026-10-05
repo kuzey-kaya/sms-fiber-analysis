@@ -58,6 +58,8 @@ def interval_sample(track: pd.DataFrame, interval: float) -> pd.DataFrame:
 
 
 def main() -> None:
+    # Redirected output on Windows is cp1252 and cannot encode "≥" or "→": replace, never crash.
+    sys.stdout.reconfigure(errors="replace")
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("csv", nargs="?", default="data/data.csv",
                    help="spectra CSV (default: data/data.csv)")

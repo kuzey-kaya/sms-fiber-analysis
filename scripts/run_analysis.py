@@ -63,6 +63,8 @@ def export_all_tracks(data, tracks, outdir: Path) -> None:
 
 
 def main() -> None:
+    # Redirected output on Windows is cp1252 and cannot encode "≥" or "→": replace, never crash.
+    sys.stdout.reconfigure(errors="replace")
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("csv", nargs="?", default=DEFAULT_CSV,

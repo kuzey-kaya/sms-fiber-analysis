@@ -99,7 +99,15 @@ It is a continuous cooldown — no setpoint steps.
 - `launch.py` — starts Streamlit headless on a free port and opens the browser (avoids Streamlit's
   first-run e-mail prompt). `run_app.bat` / `run_app.command` — create `.venv`, install
   `requirements.txt` once (marker `.venv/installed.txt`), then call `launch.py`.
+  `launch.py` also prints the LAN address (`lan_address()`) for opening the app from a tablet on
+  the same Wi-Fi (Streamlit listens on all interfaces; no password). `run_app.command` is stored
+  executable in git (mode 100755) and pinned to LF by `.gitattributes`.
   `.claude/launch.json` — preview config for Claude Code (port 8765).
+- `HANDBOOK.md` — how to get and run the project per device: Windows, macOS/Linux, tablets
+  (same-Wi-Fi address, Streamlit Community Cloud, GitHub Codespaces), own data, scripts, updating,
+  troubleshooting. Its status table says what was actually tried; keep it honest when that changes.
+- Repository: https://github.com/kuzey-kaya/sms-fiber-analysis (`main`; git set up 2026-10-05).
+  Commit and push after each change.
 
 ## Physics the code relies on
 

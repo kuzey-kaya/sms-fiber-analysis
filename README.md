@@ -43,7 +43,11 @@ cooldown 44 °C → 22.8 °C over ~4.8 h, one spectrum every ~23 s.
 
 A browser-based interface on top of the same package: load a spectra file, adjust
 the settings in the sidebar, and every view updates immediately. Nothing is sent
-anywhere — the app runs on your own computer and opens in your browser.
+anywhere — the app runs on your own computer and opens in your browser (other
+devices on the same network can open it too while it runs; see the handbook).
+
+Step-by-step instructions for Windows, macOS, Linux and tablets (iPad), plus
+updating and troubleshooting, are in [HANDBOOK.md](HANDBOOK.md).
 
 **Install and start (Windows and macOS)**
 

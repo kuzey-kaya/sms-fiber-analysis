@@ -25,6 +25,17 @@ def free_port(preferred: int = 8501) -> int:
     raise RuntimeError("no free port found")
 
 
+def lan_address() -> str | None:
+    """This computer's address on the local network (for a tablet or phone)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))  # no packet is sent; only picks the interface
+            ip = s.getsockname()[0]
+    except OSError:
+        return None
+    return None if ip.startswith("127.") else ip
+
+
 def main():
     port = free_port()
     url = f"http://localhost:{port}"
@@ -43,7 +54,11 @@ def main():
                 if s.connect_ex(("127.0.0.1", port)) == 0:
                     break
             time.sleep(0.5)
-        print(f"\nFringeLab is running at {url}\nClose this window (or press Ctrl+C) to stop it.\n")
+        print(f"\nFringeLab is running at {url}")
+        ip = lan_address()
+        if ip:
+            print(f"From a tablet or phone on the same Wi-Fi: http://{ip}:{port}")
+        print("Close this window (or press Ctrl+C) to stop it.\n")
         webbrowser.open(url)
         proc.wait()
     except KeyboardInterrupt:
