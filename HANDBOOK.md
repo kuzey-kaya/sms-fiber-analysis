@@ -10,7 +10,8 @@ and the analysis scripts. For what the analysis does, see [README.md](README.md)
 | Windows 10/11 | double-click `run_app.bat` | install and app start checked on Windows 11, Python 3.12 (2026-10-05) |
 | macOS | `bash run_app.command` in Terminal, or double-click `run_app.command` | written for macOS, **not yet tried on a real Mac** |
 | Linux | `bash run_app.command` | not tried |
-| iPad / iPhone / Android | open the app in the browser while it runs on a computer (same Wi-Fi) or in the cloud | same-Wi-Fi address checked from the host computer only; cloud routes **not tried** |
+| Any device with a browser (iPad, phone, Mac, PC) | open <https://fringelab.streamlit.app> — nothing to install | hosted copy on Streamlit Community Cloud; loads without sign-in (checked 2026-10-05, desktop browser) |
+| iPad / iPhone / Android, own computer as host | open the app in the browser while it runs on a computer on the same Wi-Fi | address checked from the host computer only, not yet from a tablet |
 
 Python does not run on iPadOS itself, so a tablet always shows an app that is
 running somewhere else. Everything a tablet needs is in [section 4](#4-ipad-iphone-android-tablet).
@@ -113,10 +114,11 @@ Notes:
 - Guest and campus networks often block device-to-device connections; in that
   case use 4b or 4c.
 
-### 4b. Streamlit Community Cloud (permanent web address) — not tried yet
+### 4b. Streamlit Community Cloud (permanent web address)
 
-Puts the app on Streamlit's servers so it opens from any device, with no
-computer of yours running.
+The app is deployed at **<https://fringelab.streamlit.app>**: open that address
+on any device, with no computer of yours running. It is public — anyone with
+the address can open it and sees the example run. To deploy your own copy:
 
 1. Go to <https://share.streamlit.io> and sign in with the GitHub account.
 2. **Create app** → choose the repository `kuzey-kaya/sms-fiber-analysis`,

@@ -106,6 +106,8 @@ It is a continuous cooldown — no setpoint steps.
 - `HANDBOOK.md` — how to get and run the project per device: Windows, macOS/Linux, tablets
   (same-Wi-Fi address, Streamlit Community Cloud, GitHub Codespaces), own data, scripts, updating,
   troubleshooting. Its status table says what was actually tried; keep it honest when that changes.
+- Hosted app: https://fringelab.streamlit.app (Streamlit Community Cloud, deployed by the owner
+  2026-10-05 from `main`/`app.py`; public, redeploys on every push to `main`).
 - Repository: https://github.com/kuzey-kaya/sms-fiber-analysis (`main`; git set up 2026-10-05).
   Commit and push after each change.
 
