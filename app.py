@@ -12,6 +12,7 @@ or, for development,
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -39,7 +40,9 @@ LINEAR_COLOR, QUAD_COLOR = "#8c8c8c", "#2E5FA3"   # calibration models
 MAX_MAP_ROWS, MAX_MAP_COLS = 1200, 2000  # display resolution of the heatmap
 MAX_3D_ROWS, MAX_3D_COLS = 150, 300
 
-st.set_page_config(page_title=APP_NAME, page_icon="〰️", layout="wide",
+ICON_PNG = ROOT / "assets" / "fringelab_icon.png"      # scripts/make_icon.py draws it
+
+st.set_page_config(page_title=APP_NAME, page_icon=str(ICON_PNG) if ICON_PNG.exists() else "〰️", layout="wide",
                    menu_items={"About": f"{APP_NAME} — fringe analysis for SMS fiber sensors."})
 
 
@@ -97,6 +100,15 @@ REPO_URL = "https://github.com/kuzey-kaya/sms-fiber-analysis"
 
 def inject_style() -> None:
     st.markdown(STYLE, unsafe_allow_html=True)
+
+
+def brand_icon() -> str:
+    """The icon inlined for the sidebar brand line (empty if the PNG is missing)."""
+    if not ICON_PNG.exists():
+        return ""
+    data = base64.b64encode(ICON_PNG.read_bytes()).decode()
+    return (f'<img src="data:image/png;base64,{data}" alt="" '
+            'style="height:30px;width:30px;vertical-align:-7px;margin-right:9px;border-radius:7px">')
 
 
 def hero(tagline: str, strip: str = "", strip_note: str = "") -> None:
@@ -449,7 +461,7 @@ def surface_figure(data, y_mode, cond_title, colorscale):
 # --------------------------------------------------------------------------
 inject_style()
 brand_slot = st.sidebar.empty()
-brand_slot.markdown(f'<div class="fl-brand">{APP_NAME}<small>Explore fiber-sensor spectra: map, '
+brand_slot.markdown(f'<div class="fl-brand">{brand_icon()}{APP_NAME}<small>Explore fiber-sensor spectra: map, '
                     'peaks, fringe tracking, calibration.</small></div>', unsafe_allow_html=True)
 
 st.sidebar.header("1 · Data")
@@ -552,7 +564,7 @@ strip = fringe_strip(data.wavelengths, data.spectra[0])
 hero(f"{file_name} — {len(data)} spectra, {len(data.wavelengths)} wavelengths, layout {data.layout}", strip,
      f"First spectrum, {data.wavelengths.min():.0f}–{data.wavelengths.max():.0f} nm, as a band: "
      "bright and dark stripes are the fringes the tracker follows.")
-brand_slot.markdown(f'<div class="fl-brand">{APP_NAME}{strip}<small>Explore fiber-sensor spectra: map, '
+brand_slot.markdown(f'<div class="fl-brand">{brand_icon()}{APP_NAME}{strip}<small>Explore fiber-sensor spectra: map, '
                     'peaks, fringe tracking, calibration.</small></div>', unsafe_allow_html=True)
 stat_strip([
     ("Spectra", f"{len(data)}", f"one every {np.median(np.diff(data.time)):.0f} s" if len(data) > 1 else ""),
