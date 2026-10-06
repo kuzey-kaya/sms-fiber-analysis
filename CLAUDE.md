@@ -105,7 +105,9 @@ It is a continuous cooldown — no setpoint steps.
   "How the file was read" expander, with a template CSV cut from the example run), `read_report`
   (loader diagnosis table), `stat_strip` (HTML key-number tiles that wrap instead of truncating),
   calibration model radio (Both / Linear / Quadratic) with a residual panel, curved columns in the
-  fringe table. `.streamlit/config.toml` sets only theme options valid in light and dark mode.
+  fringe table. `.streamlit/config.toml` sets the accent colour and radius under `[theme.light]`
+  and `[theme.dark]` separately — a plain `[theme]` block pins Streamlit to its light base and the
+  app stops following the system dark mode (happened 2026-10-06, fixed the same day).
   Look & feel lives in `STYLE` (CSS injected by `inject_style`), `hero`, `footer`; tabs use
   `:material/...:` icons; settings sections 2 and 3 are collapsed expanders. Colours in the CSS are
   only opacity/rgba so both themes work; Streamlit's deploy button is hidden.

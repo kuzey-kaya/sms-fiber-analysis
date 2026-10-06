@@ -1,8 +1,12 @@
-# FringeLab look. Only options that work in both light and dark mode are set,
-# so the app follows the viewer's system theme.
-[theme]
+# FringeLab look. The same accent and corner radius are given for the light and
+# the dark theme separately, so Streamlit keeps following the viewer's system
+# setting (a plain [theme] block would pin the app to its light base).
+[theme.light]
 primaryColor = "#2E5FA3"
-font = "sans-serif"
+baseRadius = "6px"
+
+[theme.dark]
+primaryColor = "#6E9BE0"
 baseRadius = "6px"
 
 [browser]
