@@ -118,6 +118,8 @@ It is a continuous cooldown — no setpoint steps.
   the same Wi-Fi (Streamlit listens on all interfaces; no password). `run_app.command` is stored
   executable in git (mode 100755) and pinned to LF by `.gitattributes`.
   `.claude/launch.json` — preview config for Claude Code (port 8765).
+- `scripts/make_icon.py` → `assets/fringelab_icon.png` (+ 64 px): the "FL" monogram over chirped
+  fringes; `app.py` uses it as the browser-tab icon (`page_icon`) and inlines it in the sidebar brand line.
 - `HANDBOOK.md` — how to get and run the project per device: Windows, macOS/Linux, tablets
   (same-Wi-Fi address, Streamlit Community Cloud, GitHub Codespaces), own data, scripts, updating,
   troubleshooting. Its status table says what was actually tried; keep it honest when that changes.
