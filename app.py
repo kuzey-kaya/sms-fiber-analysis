@@ -50,25 +50,22 @@ STYLE = """
 <style>
 .block-container {padding-top: 3.4rem; padding-bottom: 2.5rem;}
 .stAppDeployButton {display: none;}
-/* serif display type: the look of a journal figure caption, not a dashboard */
-.fl-hero h1, .fl-brand {font-family: "Source Serif Pro", "Source Serif 4", Georgia, "Times New Roman", serif;}
 .fl-hero {display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:0;}
-.fl-hero h1 {font-size:2.6rem; font-weight:600; letter-spacing:-0.015em; margin:0; padding:0; line-height:1.1;}
+.fl-hero h1 {font-size:2.4rem; font-weight:700; letter-spacing:-0.02em; margin:0; padding:0; line-height:1.1;}
 .fl-hero .fl-tag {font-size:0.95rem; opacity:0.62;}
 /* the fringe strip: the first spectrum of the loaded run, drawn as bands */
 .fl-strip {height:18px; border-radius:3px; margin:12px 0 18px 0; width:100%;}
 .fl-strip-note {font-size:0.74rem; opacity:0.55; margin:-12px 0 16px 0;}
-/* key figures: quiet, no boxes */
-.fl-figs {display:flex; flex-wrap:wrap; gap:6px 36px; margin:0 0 10px 0;}
-.fl-fig {min-width:120px;}
-.fl-fig .v {font-family: "Source Serif Pro", "Source Serif 4", Georgia, serif; font-size:1.7rem;
-            font-weight:600; line-height:1.15; font-variant-numeric: tabular-nums;}
-.fl-fig .l {font-size:0.8rem; opacity:0.68;}
-.fl-fig .n {font-size:0.74rem; opacity:0.5;}
+/* key figures: light tiles, wrap on narrow screens */
+.fl-figs {display:flex; flex-wrap:wrap; gap:10px; margin:0 0 14px 0;}
+.fl-fig {flex:1 1 150px; min-width:140px; padding:10px 14px; border-radius:8px;
+         border:1px solid rgba(128,128,128,0.3); background:rgba(128,128,128,0.06);}
+.fl-fig .v {font-size:1.5rem; font-weight:650; line-height:1.3; font-variant-numeric: tabular-nums;}
+.fl-fig .l {font-size:0.78rem; opacity:0.7;}
+.fl-fig .n {font-size:0.74rem; opacity:0.55;}
 .stTabs [data-baseweb="tab"] {font-weight:600; padding-left:4px; padding-right:4px;}
-.fl-brand {font-size:1.55rem; font-weight:600; letter-spacing:-0.01em; margin-bottom:0; line-height:1.2;}
-.fl-brand small {font-family: inherit; font-size:0.8rem; font-weight:400; opacity:0.65; display:block;
-                 margin-top:4px; font-family: "Source Sans Pro", "Source Sans 3", sans-serif;}
+.fl-brand {font-size:1.5rem; font-weight:700; letter-spacing:-0.02em; margin-bottom:0; line-height:1.2;}
+.fl-brand small {font-size:0.8rem; font-weight:400; opacity:0.65; display:block; margin-top:4px;}
 .fl-brand .fl-strip {height:8px; margin:8px 0 2px 0;}
 .fl-foot {font-size:0.78rem; opacity:0.55; margin-top:28px; padding-top:10px;
           border-top:1px solid rgba(128,128,128,0.25);}
