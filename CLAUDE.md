@@ -106,6 +106,9 @@ It is a continuous cooldown — no setpoint steps.
   (loader diagnosis table), `stat_strip` (HTML key-number tiles that wrap instead of truncating),
   calibration model radio (Both / Linear / Quadratic) with a residual panel, curved columns in the
   fringe table. `.streamlit/config.toml` sets only theme options valid in light and dark mode.
+  Look & feel lives in `STYLE` (CSS injected by `inject_style`), `hero`, `footer`; tabs use
+  `:material/...:` icons; settings sections 2 and 3 are collapsed expanders. Colours in the CSS are
+  only opacity/rgba so both themes work; Streamlit's deploy button is hidden.
 - `launch.py` — starts Streamlit headless on a free port and opens the browser (avoids Streamlit's
   first-run e-mail prompt). `run_app.bat` / `run_app.command` — create `.venv`, install
   `requirements.txt` once (marker `.venv/installed.txt`), then call `launch.py`.
