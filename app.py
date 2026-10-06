@@ -44,6 +44,48 @@ st.set_page_config(page_title=APP_NAME, page_icon="〰️", layout="wide",
 
 
 # --------------------------------------------------------------------------
+# look & feel
+# --------------------------------------------------------------------------
+STYLE = """
+<style>
+/* tighter top, no Streamlit deploy button */
+.block-container {padding-top: 3.4rem; padding-bottom: 2.5rem;}
+.stAppDeployButton {display: none;}
+/* hero */
+.fl-hero {display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:2px;}
+.fl-hero h1 {font-size:2.3rem; font-weight:700; letter-spacing:-0.02em; margin:0; padding:0;}
+.fl-hero .fl-tag {font-size:0.95rem; opacity:0.65;}
+.fl-rule {height:3px; width:72px; border-radius:2px; margin:6px 0 14px 0;
+          background: linear-gradient(90deg, #2E5FA3, #C4402F);}
+/* tabs: a little more presence */
+.stTabs [data-baseweb="tab"] {font-weight:600; padding-left:4px; padding-right:4px;}
+/* sidebar brand */
+.fl-brand {font-size:1.5rem; font-weight:700; letter-spacing:-0.02em; margin-bottom:0;}
+.fl-brand small {font-size:0.8rem; font-weight:400; opacity:0.65; display:block; margin-top:2px;}
+.fl-foot {font-size:0.78rem; opacity:0.55; margin-top:28px; padding-top:10px;
+          border-top:1px solid rgba(128,128,128,0.25);}
+</style>
+"""
+REPO_URL = "https://github.com/kuzey-kaya/sms-fiber-analysis"
+
+
+def inject_style() -> None:
+    st.markdown(STYLE, unsafe_allow_html=True)
+
+
+def hero(tagline: str) -> None:
+    st.markdown(f'<div class="fl-hero"><h1>{APP_NAME}</h1><span class="fl-tag">{tagline}</span></div>'
+                '<div class="fl-rule"></div>', unsafe_allow_html=True)
+
+
+def footer() -> None:
+    st.markdown(f'<div class="fl-foot">{APP_NAME} · SMS fiber-sensor fringe analysis · '
+                f'<a href="{REPO_URL}" target="_blank">source &amp; handbook on GitHub</a> · '
+                'figures: hover for values, drag to zoom, camera icon to save as PNG</div>',
+                unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------
 # file-format guide
 # --------------------------------------------------------------------------
 FORMAT_RULES = """
@@ -376,8 +418,9 @@ def surface_figure(data, y_mode, cond_title, colorscale):
 # --------------------------------------------------------------------------
 # sidebar: data + settings
 # --------------------------------------------------------------------------
-st.sidebar.title(APP_NAME)
-st.sidebar.caption("Explore fiber-sensor spectra: map, peaks, fringe tracking, calibration.")
+inject_style()
+st.sidebar.markdown(f'<div class="fl-brand">〰️ {APP_NAME}<small>Explore fiber-sensor spectra: map, '
+                    'peaks, fringe tracking, calibration.</small></div>', unsafe_allow_html=True)
 
 st.sidebar.header("1 · Data")
 sources = ["Upload a CSV file"]
@@ -391,9 +434,18 @@ if source == "Upload a CSV file":
     upload = st.sidebar.file_uploader("Spectra file", type=["csv", "txt", "tsv", "dat"],
                                       help="CSV / TXT / TSV / DAT, up to Streamlit's upload limit (200 MB).")
     if upload is None:
-        st.title(APP_NAME)
-        st.markdown("Upload a spectra file in the sidebar to begin. This is the file layout "
-                    f"{APP_NAME} expects:")
+        hero("fringe analysis for SMS fiber sensors")
+        intro, what = st.columns([1.1, 1])
+        intro.markdown("**Upload a spectra file in the sidebar to begin.**\n\n"
+                       "A run is a CSV of transmission spectra recorded while a condition — "
+                       "temperature, strain, load — changes. The file layout below is what "
+                       f"{APP_NAME} expects; a template is available to download.")
+        what.markdown("**What you get**\n"
+                      "- the whole run as a wavelength × time map\n"
+                      "- every peak and dip of every spectrum\n"
+                      "- each interference fringe tracked through the run\n"
+                      "- linear and curved calibration, sensitivity per fringe\n"
+                      "- CSV export of all of it")
         example = None
         if EXAMPLE_CSV.exists():
             try:
@@ -422,7 +474,7 @@ cond_title = f"{cond_name} ({cond_unit})" if cond_unit else cond_name
 try:
     full = load_data(file_bytes, suffix, _col(cond_col_txt), _col(time_col_txt), example_stamp)
 except Exception as exc:  # noqa: BLE001 - show any loader problem to the user
-    st.title(APP_NAME)
+    hero("fringe analysis for SMS fiber sensors")
     st.error(f"Could not read **{file_name}**: {exc}")
     st.markdown("Check the file against the expected layout:")
     format_guide(None, key="error")
@@ -437,22 +489,23 @@ if keep.sum() < 20:
 data = replace(full, wavelengths=full.wavelengths[keep], spectra=full.spectra[:, keep])
 has_cond = data.has_temperature
 
-st.sidebar.header("2 · Peak detection")
-prominence = st.sidebar.number_input(
-    "Prominence (transmittance)", 0.0005, 1.0, 0.02, 0.005, format="%.4f",
-    help="How much a peak/dip must stand out from its surroundings. Lower = more, weaker extrema.")
-distance = st.sidebar.slider("Minimum separation (samples)", 1, 100, 5)
-smooth_window = st.sidebar.slider("Smoothing window (samples)", 5, 51, 11, step=2,
-                                  help="Savitzky–Golay window applied before detection.")
+with st.sidebar.expander("2 · Peak detection", expanded=False):
+    prominence = st.number_input(
+        "Prominence (transmittance)", 0.0005, 1.0, 0.02, 0.005, format="%.4f",
+        help="How much a peak/dip must stand out from its surroundings. Lower = more, weaker extrema.")
+    distance = st.slider("Minimum separation (samples)", 1, 100, 5)
+    smooth_window = st.slider("Smoothing window (samples)", 5, 51, 11, step=2,
+                              help="Savitzky–Golay window applied before detection.")
 
-st.sidebar.header("3 · Fringe tracking")
-search_window = st.sidebar.slider(
-    "Search half-window (nm)", 0.1, 10.0, 1.5, 0.1,
-    help="How far from its last position a fringe is searched. Keep below the fringe spacing.")
-reject = st.sidebar.checkbox("Reject jumps (fringe-hop guard)", True)
-max_step = st.sidebar.slider("Largest allowed jump per spectrum (nm)", 0.05, 5.0, 0.5, 0.05,
-                             disabled=not reject) if reject else None
-min_lock = st.sidebar.slider("Count a fringe as tracked when locked ≥ (%)", 10, 100, 90, 5)
+with st.sidebar.expander("3 · Fringe tracking", expanded=False):
+    search_window = st.slider(
+        "Search half-window (nm)", 0.1, 10.0, 1.5, 0.1,
+        help="How far from its last position a fringe is searched. Keep below the fringe spacing.")
+    reject = st.checkbox("Reject jumps (fringe-hop guard)", True)
+    max_step = st.slider("Largest allowed jump per spectrum (nm)", 0.05, 5.0, 0.5, 0.05,
+                         disabled=not reject) if reject else None
+    min_lock = st.slider("Count a fringe as tracked when locked ≥ (%)", 10, 100, 90, 5)
+st.sidebar.caption("Defaults are the values used for the published analysis; open a section to change them.")
 
 data_key = hashlib.md5(
     (file_bytes or example_stamp.encode()) + repr((cond_col_txt, time_col_txt, wl_range)).encode()).hexdigest()
@@ -463,9 +516,7 @@ tracked = table[table["locked_pct"] >= min_lock]
 # --------------------------------------------------------------------------
 # header
 # --------------------------------------------------------------------------
-st.title(APP_NAME)
-st.caption(f"**{file_name}** · layout: {data.layout} · "
-           f"{len(data)} spectra × {len(data.wavelengths)} wavelengths")
+hero(f"{file_name} · layout: {data.layout} · {len(data)} spectra × {len(data.wavelengths)} wavelengths")
 stat_strip([
     ("Spectra", f"{len(data)}", f"one every {np.median(np.diff(data.time)):.0f} s" if len(data) > 1 else ""),
     ("Wavelength (nm)", f"{data.wavelengths.min():.0f}–{data.wavelengths.max():.0f}",
@@ -489,7 +540,9 @@ y_modes = ["Time", "Spectrum number"] + (["Condition"] if has_cond else [])
 y_label = {"Time": "Time", "Spectrum number": "Spectrum number", "Condition": cond_name}.get
 
 tab_map, tab_spec, tab_track, tab_sens, tab_3d, tab_export = st.tabs(
-    ["Spectral map", "Spectrum & peaks", "Fringe tracking", "Sensitivity", "3-D view", "Export"])
+    [":material/gradient: Spectral map", ":material/show_chart: Spectrum & peaks",
+     ":material/timeline: Fringe tracking", ":material/thermostat: Sensitivity",
+     ":material/view_in_ar: 3-D view", ":material/download: Export"])
 
 # ---- spectral map ---------------------------------------------------------
 with tab_map:
@@ -661,3 +714,5 @@ with tab_export:
                          f"{stem}_fringes.csv", "text/csv")
     c[3].download_button("Settings (JSON)", json.dumps(settings, indent=2),
                          f"{stem}_settings.json", "application/json")
+
+footer()
