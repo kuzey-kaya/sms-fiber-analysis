@@ -181,7 +181,8 @@ macOS / Linux:
 
 The other scripts are started the same way: `inspect_csv.py`,
 `peak_inventory.py --interval 1200`, `staircase_views.py`, `hero_figures.py`,
-`spectral_3d.py`. Each takes an optional CSV path and `--outdir`; the README
+`spectral_3d.py`, `make_movie.py` (an animated GIF of the run; `--format mp4`
+needs ffmpeg installed). Each takes an optional CSV path and `--outdir`; the README
 lists what each one writes.
 
 ## 7. Updating

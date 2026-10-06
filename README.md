@@ -76,6 +76,7 @@ The start page (and the *How the file was read* panel above the tabs) shows the
 expected file layout with a downloadable template CSV and a report of how the
 loaded file was interpreted.
 | 3-D view | transmittance as height over wavelength × time/condition (rotatable) |
+| Movie | the run animated frame by frame (spectrum + extrema, map cursor, tracked fringe) with play/pause and a time slider; GIF export for slides |
 | Export | tracked fringes (wide/long CSV), fringe table, the settings used |
 
 Sidebar settings: data source (the example run `data/data.csv` or an uploaded
@@ -131,6 +132,19 @@ Regenerates the Igor-style step-like views of the cooldown: temperature-bin
 plateaus (`fig9`), the legacy Colab tracker with its fringe-hop (`fig10`,
 `fig11`) and the strongest peak in a fixed band (`fig12`).
 
+### Movie of the run (Igor-style movie export)
+
+```bash
+python scripts/make_movie.py                    # figures/movie_run.gif, every 5th spectrum, 12 fps
+python scripts/make_movie.py --format mp4 --every 3 --track 1542.3   # MP4 needs ffmpeg on the PATH
+```
+
+Each frame shows the current spectrum with its detected peaks and dips (the
+first spectrum as a grey ghost), the spectral map with a cursor at the current
+time, and the most sensitive tracked fringe drawn up to that time in the Igor
+colours, with time and temperature stamped. The same animation runs in the app's
+*Movie* tab with play/pause and a time slider, plus a "Render as GIF" button.
+
 ### Presentation and 3-D figures
 
 ```bash
@@ -161,6 +175,7 @@ python scripts/spectral_3d.py      # fig18-19: 3-D views (+ interactive HTML wit
 | `fig18_3d_spectral_surface.png` | 3-D: spectral map on the floor, each tracked fringe rising with temperature, cooling curve on the back wall (`scripts/spectral_3d.py`) |
 | `fig19_3d_fringe_landscape.png` | 3-D: transmittance as height over wavelength × temperature — ridges/valleys tilting across λc |
 | `fig18_3d_interactive.html` | rotatable version of fig18; written only if `plotly` is installed (`pip3 install plotly`) |
+| `movie_run.gif` / `.mp4` | the run animated: spectrum + extrema per frame, map with time cursor, tracked fringe growing (`scripts/make_movie.py`) |
 | `fig20_calibration_models.png` | linear vs quadratic calibration of the detailed fringe with both residual series (`run_analysis.py`) |
 | `tracked_all_long.csv` | every tracked fringe: fringe, time, T, wavelength, value (one row per fringe per frame) |
 | `tracked_all_wide.csv` | every tracked fringe: one wavelength column per fringe, one row per frame |

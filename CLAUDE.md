@@ -30,6 +30,7 @@ python3 scripts/peak_inventory.py --interval 1200  # all peaks, trajectories, in
 python3 scripts/staircase_views.py                 # fig9-12 staircase / fringe-hop views (Igor style)
 python3 scripts/hero_figures.py                    # fig15-17 annotated maps
 python3 scripts/spectral_3d.py                     # fig18-19 3-D views (+ HTML if plotly installed)
+python3 scripts/make_movie.py                      # movie_run.gif: the run animated (Igor movie export)
 ```
 Interactive app (FringeLab, draft): `python3 launch.py`, or double-click `run_app.bat` (Windows) /
 `run_app.command` (macOS); development: `streamlit run app.py`.
@@ -118,6 +119,18 @@ It is a continuous cooldown — no setpoint steps.
   the same Wi-Fi (Streamlit listens on all interfaces; no password). `run_app.command` is stored
   executable in git (mode 100755) and pinned to LF by `.gitattributes`.
   `.claude/launch.json` — preview config for Claude Code (port 8765).
+- `sms_analysis/movie.py` — `render_movie` (matplotlib FuncAnimation: spectrum + extrema per frame,
+  map with time cursor, one tracked fringe growing in Igor colours; MP4 via ffmpeg if on PATH, else
+  GIF via Pillow) and `frame_rows` (every N-th row, last row always included). Asked for by the
+  advisor on 2026-10-06 as the counterpart of Igor Pro's movie export.
+- `scripts/make_movie.py` — CLI for it → `figures/movie_run.gif` (`--format mp4`, `--every`, `--fps`,
+  `--track`, `--no-track`); default fringe = most sensitive reliably tracked one.
+- `app.py` Movie tab — Plotly animation (`movie_figure`, ≤ 150 frames, ≤ 500 wavelength points per
+  frame, frames update traces 1,2,3,4,5,6; play/pause + time slider) and a cached on-demand GIF
+  render (`movie_gif`) for slides. The map panel is a static viridis PNG layout image
+  (`map_image`), not a Heatmap trace: Plotly's animation redraw dropped the heatmap and the JSON
+  was far heavier. `figures/movie_run.gif` (7.4 MB, 147 frames) is committed once; regenerate only
+  when the analysis changes, each regeneration adds its size to the git history.
 - `scripts/make_icon.py` → `assets/fringelab_icon.png` (+ 64 px): the "FL" monogram over chirped
   fringes; `app.py` uses it as the browser-tab icon (`page_icon`) and inlines it in the sidebar brand line.
 - `HANDBOOK.md` — how to get and run the project per device: Windows, macOS/Linux, tablets

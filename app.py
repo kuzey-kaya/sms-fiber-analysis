@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import tempfile
+import time as _time
 from dataclasses import replace
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from plotly.subplots import make_subplots
 from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_sms_csv,
                           track_all_extrema)
 from sms_analysis.io import SpectraSet
+from sms_analysis.movie import frame_rows, render_movie
 
 APP_NAME = "FringeLab"
 ROOT = Path(__file__).resolve().parent
@@ -456,6 +458,141 @@ def surface_figure(data, y_mode, cond_title, colorscale):
     return fig
 
 
+MOVIE_MAX_FRAMES, MOVIE_MAX_COLS = 150, 500
+
+
+@st.cache_data(show_spinner="Finding the extrema of every frame…")
+def movie_extrema(_data: SpectraSet, data_key: str, rows: tuple, prominence: float, distance: int,
+                  smooth_window: int):
+    out = []
+    for r in rows:
+        ext = detect_extrema(_data.wavelengths, _data.spectra[r], prominence=prominence,
+                             distance=distance, smooth_window=smooth_window)
+        out.append((ext.peak_wavelengths, ext.peak_values, ext.dip_wavelengths, ext.dip_values))
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def map_image(_data: SpectraSet, max_rows: int = 400, max_cols: int = 600) -> str:
+    """The spectral map as a viridis PNG data-URI (background of the movie's map panel)."""
+    import base64 as _b64
+    from io import BytesIO
+    from matplotlib import colormaps
+    from PIL import Image
+    sr = max(1, int(np.ceil(len(_data) / max_rows)))
+    sc = max(1, int(np.ceil(len(_data.wavelengths) / max_cols)))
+    z = _data.spectra[::sr, ::sc][::-1]                # first spectrum at the bottom
+    lo, hi = np.nanmin(z), np.nanmax(z)
+    rgba = (colormaps["viridis"]((np.nan_to_num(z, nan=lo) - lo) / (hi - lo if hi > lo else 1.0)) * 255).astype(np.uint8)
+    buf = BytesIO()
+    Image.fromarray(rgba).save(buf, format="PNG")
+    return "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode()
+
+
+def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, fps):
+    """Plotly animation: spectrum + extrema per frame, map cursor, fringe trace growing."""
+    wl = data.wavelengths
+    sc = max(1, int(np.ceil(len(wl) / MOVIE_MAX_COLS)))
+    t_min = data.time / 60.0
+    has_cond = data.has_temperature
+    sr = max(1, len(data) // 400)
+    fig = make_subplots(rows=2, cols=2, specs=[[{"rowspan": 2}, {}], [None, {"secondary_y": True}]],
+                        column_widths=[0.58, 0.42], vertical_spacing=0.16, horizontal_spacing=0.1,
+                        subplot_titles=("", "Spectral map", f"Tracked {track_label}" if track is not None else ""))
+
+    def frame_traces(k):
+        r = rows[k]
+        pw, pv, dw, dv = extrema[k]
+        seg = track.iloc[: r + 1] if track is not None else None
+        return [
+            go.Scatter(x=wl[::sc], y=data.spectra[r][::sc], mode="lines", line=dict(color="#444444", width=1.5),
+                       name="current spectrum", hovertemplate="λ %{x:.2f} nm · %{y:.4f}<extra></extra>"),
+            go.Scatter(x=pw, y=pv, mode="markers", name="peaks",
+                       marker=dict(symbol="circle", size=8, color=PEAK_COLOR, line=dict(color="black", width=0.5))),
+            go.Scatter(x=dw, y=dv, mode="markers", name="dips",
+                       marker=dict(symbol="triangle-down", size=8, color=DIP_COLOR, line=dict(color="black", width=0.5))),
+            go.Scatter(x=[wl.min(), wl.max()], y=[t_min[r], t_min[r]], mode="lines", name="now",
+                       line=dict(color="white", width=2), showlegend=False, hoverinfo="skip"),
+            go.Scatter(x=seg["time"] if seg is not None else [], y=seg["wavelength"] if seg is not None else [],
+                       mode="lines", line=dict(color=RED, width=1.6), name="wavelength", showlegend=False,
+                       connectgaps=False),
+            go.Scatter(x=seg["time"] if (seg is not None and has_cond) else [],
+                       y=seg["temperature"] if (seg is not None and has_cond) else [],
+                       mode="lines", line=dict(color=BLUE, width=1.6), name=cond_name, showlegend=False),
+        ]
+
+    base = frame_traces(0)
+    fig.add_trace(go.Scatter(x=wl[::sc], y=data.spectra[0][::sc], mode="lines", name="first spectrum",
+                             line=dict(color="#aaaaaa", width=1), opacity=0.6, hoverinfo="skip"), row=1, col=1)
+    fig.add_trace(base[0], row=1, col=1)
+    fig.add_trace(base[1], row=1, col=1)
+    fig.add_trace(base[2], row=1, col=1)
+    # The map is a static picture behind the cursor (a Heatmap trace is dropped by
+    # Plotly's animation redraw and makes every frame heavy).
+    fig.add_layout_image(source=map_image(data), xref="x2", yref="y2", x=wl.min(), y=t_min.max(),
+                         sizex=wl.max() - wl.min(), sizey=t_min.max() - t_min.min(),
+                         sizing="stretch", layer="below", xanchor="left", yanchor="top")
+    fig.add_trace(base[3], row=1, col=2)
+    fig.add_trace(base[4], row=2, col=2, secondary_y=False)
+    fig.add_trace(base[5], row=2, col=2, secondary_y=True)
+    # traces 1,2,3 (spectrum, peaks, dips), 4 (cursor), 5,6 (track, condition) change per frame
+    animated = [1, 2, 3, 4, 5, 6]
+
+    def stamp(r):
+        text = f"spectrum {r + 1}/{len(data)} · t = {data.time[r]:.0f} s"
+        if has_cond:
+            text += f" · {cond_name} = {data.temperature[r]:.2f} {cond_unit}"
+        return text
+
+    frames = [go.Frame(name=str(k), data=frame_traces(k), traces=animated,
+                       layout=go.Layout(title_text=stamp(rows[k])))
+              for k in range(len(rows))]
+    fig.frames = frames
+    step = dict(duration=int(1000 / fps), redraw=True)
+    fig.update_layout(
+        height=640, margin=dict(l=10, r=10, t=100, b=10),
+        title=dict(text=stamp(rows[0]), x=0, xanchor="left", y=0.985, yanchor="top"),
+        legend=dict(orientation="h", y=-0.08, x=0),
+        updatemenus=[dict(type="buttons", showactive=False, x=0, y=1.0, xanchor="left", yanchor="bottom",
+                          direction="right", pad=dict(b=4),
+                          buttons=[dict(label="▶ Play", method="animate",
+                                        args=[None, dict(frame=step, fromcurrent=True, transition=dict(duration=0))]),
+                                   dict(label="❚❚ Pause", method="animate",
+                                        args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])],
+        sliders=[dict(active=0, x=0.0, y=-0.2, len=1.0, pad=dict(t=0),
+                      currentvalue=dict(visible=False),
+                      steps=[dict(method="animate", label=f"{t_min[r]:.0f}",
+                                  args=[[str(k)], dict(frame=dict(duration=0, redraw=True), mode="immediate")])
+                             for k, r in enumerate(rows)])],
+    )
+    lo, hi = np.nanmin(data.spectra), np.nanmax(data.spectra)
+    fig.update_xaxes(title_text="Wavelength (nm)", range=[wl.min(), wl.max()], row=1, col=1)
+    fig.update_yaxes(title_text="Transmittance", range=[lo - 0.04 * (hi - lo), hi + 0.08 * (hi - lo)], row=1, col=1)
+    fig.update_xaxes(range=[wl.min(), wl.max()], row=1, col=2)
+    fig.update_yaxes(title_text="Time (min)", range=[t_min.min(), t_min.max()], row=1, col=2)
+    fig.update_xaxes(title_text="Time (s)", range=[data.time.min(), data.time.max()], row=2, col=2)
+    if track is not None:
+        ok = track.dropna(subset=["wavelength"])
+        pad = 0.05 * (ok["wavelength"].max() - ok["wavelength"].min() + 1e-9)
+        fig.update_yaxes(title_text="λ (nm)", color=RED, range=[ok["wavelength"].min() - pad, ok["wavelength"].max() + pad],
+                         row=2, col=2, secondary_y=False)
+        if has_cond:
+            fig.update_yaxes(title_text=f"{cond_name} ({cond_unit})", color=BLUE, showgrid=False,
+                             range=[np.nanmin(data.temperature), np.nanmax(data.temperature)],
+                             row=2, col=2, secondary_y=True)
+    return fig
+
+
+@st.cache_data(show_spinner=False)
+def movie_gif(_data: SpectraSet, _track, data_key: str, track_label: str, every: int, fps: int,
+              prominence: float, distance: int, smooth_window: int, cond_name: str, cond_unit: str) -> bytes:
+    with tempfile.TemporaryDirectory() as tmp:
+        out = render_movie(_data, Path(tmp) / "movie.gif", track=_track, track_label=track_label,
+                           every=every, fps=fps, prominence=prominence, distance=distance,
+                           smooth_window=smooth_window, cond_name=cond_name, cond_unit=cond_unit, dpi=80)
+        return out.read_bytes()
+
+
 # --------------------------------------------------------------------------
 # sidebar: data + settings
 # --------------------------------------------------------------------------
@@ -588,10 +725,10 @@ if not has_cond:
 y_modes = ["Time", "Spectrum number"] + (["Condition"] if has_cond else [])
 y_label = {"Time": "Time", "Spectrum number": "Spectrum number", "Condition": cond_name}.get
 
-tab_map, tab_spec, tab_track, tab_sens, tab_3d, tab_export = st.tabs(
+tab_map, tab_spec, tab_track, tab_sens, tab_3d, tab_movie, tab_export = st.tabs(
     [":material/gradient: Spectral map", ":material/show_chart: Spectrum & peaks",
      ":material/timeline: Fringe tracking", ":material/thermostat: Sensitivity",
-     ":material/view_in_ar: 3-D view", ":material/download: Export"])
+     ":material/view_in_ar: 3-D view", ":material/movie: Movie", ":material/download: Export"])
 
 # ---- spectral map ---------------------------------------------------------
 with tab_map:
@@ -739,6 +876,44 @@ with tab_3d:
                    help="Off by default because the surface takes a moment to draw."):
         st.plotly_chart(surface_figure(data, y3, cond_title, cmap3), width="stretch")
         st.caption("Transmittance as height. Drag to rotate, scroll to zoom.")
+
+# ---- movie ----------------------------------------------------------------
+with tab_movie:
+    st.markdown("The run as a movie: the spectrum frame by frame with its peaks and dips, the "
+                "map with a cursor at the current time, and one tracked fringe drawn as time advances "
+                "— the Igor Pro movie, in the browser.")
+    c = st.columns([1.3, 1, 1, 1.2])
+    labels = list(table["fringe"])
+    if labels:
+        ranked = tracked.dropna(subset=["sensitivity_pm"]) if has_cond else tracked
+        default_m = (ranked.loc[ranked["sensitivity_pm"].abs().idxmax(), "fringe"]
+                     if has_cond and len(ranked) else (tracked["fringe"].iloc[0] if len(tracked) else labels[0]))
+        movie_label = c[0].selectbox("Fringe in the lower-right panel", labels, index=labels.index(default_m),
+                                     key="movie_fringe")
+        movie_track = tracks[movie_label]
+    else:
+        movie_label, movie_track = "", None
+    every_m = c[1].slider("Every N-th spectrum", 1, max(2, len(data) // 20), max(1, int(np.ceil(len(data) / MOVIE_MAX_FRAMES))),
+                          help="Fewer frames load faster; the last spectrum is always included.")
+    fps_m = c[2].slider("Frames per second", 2, 30, 12)
+    rows_m = tuple(int(r) for r in frame_rows(len(data), every_m, MOVIE_MAX_FRAMES))
+    ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window)
+    st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m),
+                    width="stretch")
+    st.caption(f"{len(rows_m)} frames. Press ▶ Play, or drag the slider (time in minutes). "
+               "Peaks and dips are detected with the sidebar settings on every frame.")
+    with c[3]:
+        st.write("")
+        if st.button("Render as GIF for slides", help="Draws every frame with matplotlib; takes a minute."):
+            t0 = _time.time()
+            with st.spinner("Rendering the GIF…"):
+                gif = movie_gif(data, movie_track, data_key, movie_label, every_m, fps_m,
+                                prominence, distance, smooth_window, cond_name, cond_unit)
+            st.session_state["movie_gif"] = (gif, f"{Path(file_name).stem}_movie.gif")
+            st.caption(f"{len(gif) / 1e6:.1f} MB in {_time.time() - t0:.0f} s")
+        if "movie_gif" in st.session_state:
+            gif, name = st.session_state["movie_gif"]
+            st.download_button("Download GIF", gif, name, "image/gif")
 
 # ---- export ---------------------------------------------------------------
 with tab_export:
