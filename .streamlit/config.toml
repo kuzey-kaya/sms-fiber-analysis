@@ -1,13 +1,16 @@
-# FringeLab look. The same accent and corner radius are given for the light and
-# the dark theme separately, so Streamlit keeps following the viewer's system
+# FringeLab look. The accent and corner radius are given for the light and the
+# dark theme separately, so Streamlit keeps following the viewer's system
 # setting (a plain [theme] block would pin the app to its light base).
+# Headings use Streamlit's bundled serif (Source Serif), body the bundled sans.
 [theme.light]
-primaryColor = "#2E5FA3"
-baseRadius = "6px"
+primaryColor = "#1F4E8C"
+headingFont = "serif"
+baseRadius = "4px"
 
 [theme.dark]
-primaryColor = "#6E9BE0"
-baseRadius = "6px"
+primaryColor = "#86ACEA"
+headingFont = "serif"
+baseRadius = "4px"
 
 [browser]
 gatherUsageStats = false

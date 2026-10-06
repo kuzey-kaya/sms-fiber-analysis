@@ -48,24 +48,53 @@ st.set_page_config(page_title=APP_NAME, page_icon="〰️", layout="wide",
 # --------------------------------------------------------------------------
 STYLE = """
 <style>
-/* tighter top, no Streamlit deploy button */
 .block-container {padding-top: 3.4rem; padding-bottom: 2.5rem;}
 .stAppDeployButton {display: none;}
-/* hero */
-.fl-hero {display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:2px;}
-.fl-hero h1 {font-size:2.3rem; font-weight:700; letter-spacing:-0.02em; margin:0; padding:0;}
-.fl-hero .fl-tag {font-size:0.95rem; opacity:0.65;}
-.fl-rule {height:3px; width:72px; border-radius:2px; margin:6px 0 14px 0;
-          background: linear-gradient(90deg, #2E5FA3, #C4402F);}
-/* tabs: a little more presence */
+/* serif display type: the look of a journal figure caption, not a dashboard */
+.fl-hero h1, .fl-brand {font-family: "Source Serif Pro", "Source Serif 4", Georgia, "Times New Roman", serif;}
+.fl-hero {display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:0;}
+.fl-hero h1 {font-size:2.6rem; font-weight:600; letter-spacing:-0.015em; margin:0; padding:0; line-height:1.1;}
+.fl-hero .fl-tag {font-size:0.95rem; opacity:0.62;}
+/* the fringe strip: the first spectrum of the loaded run, drawn as bands */
+.fl-strip {height:18px; border-radius:3px; margin:12px 0 18px 0; width:100%;}
+.fl-strip-note {font-size:0.74rem; opacity:0.55; margin:-12px 0 16px 0;}
+/* key figures: quiet, no boxes */
+.fl-figs {display:flex; flex-wrap:wrap; gap:6px 36px; margin:0 0 10px 0;}
+.fl-fig {min-width:120px;}
+.fl-fig .v {font-family: "Source Serif Pro", "Source Serif 4", Georgia, serif; font-size:1.7rem;
+            font-weight:600; line-height:1.15; font-variant-numeric: tabular-nums;}
+.fl-fig .l {font-size:0.8rem; opacity:0.68;}
+.fl-fig .n {font-size:0.74rem; opacity:0.5;}
 .stTabs [data-baseweb="tab"] {font-weight:600; padding-left:4px; padding-right:4px;}
-/* sidebar brand */
-.fl-brand {font-size:1.5rem; font-weight:700; letter-spacing:-0.02em; margin-bottom:0;}
-.fl-brand small {font-size:0.8rem; font-weight:400; opacity:0.65; display:block; margin-top:2px;}
+.fl-brand {font-size:1.55rem; font-weight:600; letter-spacing:-0.01em; margin-bottom:0; line-height:1.2;}
+.fl-brand small {font-family: inherit; font-size:0.8rem; font-weight:400; opacity:0.65; display:block;
+                 margin-top:4px; font-family: "Source Sans Pro", "Source Sans 3", sans-serif;}
+.fl-brand .fl-strip {height:8px; margin:8px 0 2px 0;}
 .fl-foot {font-size:0.78rem; opacity:0.55; margin-top:28px; padding-top:10px;
           border-top:1px solid rgba(128,128,128,0.25);}
 </style>
 """
+STRIP_DARK, STRIP_LIGHT = (0x14, 0x2A, 0x4E), (0xDD, 0xE7, 0xF5)   # band colours, same in both themes
+
+
+def fringe_strip(wavelengths: np.ndarray, spectrum: np.ndarray, stops: int = 240) -> str:
+    """One spectrum as a horizontal band pattern (CSS gradient), like one row of the map."""
+    y = np.asarray(spectrum, dtype=float)
+    ok = np.isfinite(y)
+    if ok.sum() < 4:
+        return ""
+    lo, hi = np.percentile(y[ok], [2, 98])
+    z = np.clip((np.nan_to_num(y, nan=lo) - lo) / (hi - lo if hi > lo else 1.0), 0, 1)
+    idx = np.linspace(0, len(z) - 1, min(stops, len(z))).astype(int)
+    parts = []
+    for i, k in enumerate(idx):
+        c = [int(round(a + (b - a) * z[k])) for a, b in zip(STRIP_DARK, STRIP_LIGHT)]
+        parts.append(f"rgb({c[0]},{c[1]},{c[2]}) {100 * i / (len(idx) - 1):.2f}%")
+    title = f"first spectrum, {wavelengths.min():.0f}–{wavelengths.max():.0f} nm: bright and dark bands are the fringes"
+    return (f'<div class="fl-strip" title="{title}" style="background:linear-gradient(90deg,'
+            + ",".join(parts) + ')"></div>')
+
+
 REPO_URL = "https://github.com/kuzey-kaya/sms-fiber-analysis"
 
 
@@ -73,9 +102,16 @@ def inject_style() -> None:
     st.markdown(STYLE, unsafe_allow_html=True)
 
 
-def hero(tagline: str) -> None:
-    st.markdown(f'<div class="fl-hero"><h1>{APP_NAME}</h1><span class="fl-tag">{tagline}</span></div>'
-                '<div class="fl-rule"></div>', unsafe_allow_html=True)
+def hero(tagline: str, strip: str = "", strip_note: str = "") -> None:
+    """Title line, then the loaded run's first spectrum as a band of fringes."""
+    html = f'<div class="fl-hero"><h1>{APP_NAME}</h1><span class="fl-tag">{tagline}</span></div>'
+    if strip:
+        html += strip
+        if strip_note:
+            html += f'<div class="fl-strip-note">{strip_note}</div>'
+    else:
+        html += '<div style="height:14px"></div>'
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def footer() -> None:
@@ -148,15 +184,11 @@ def stat_strip(items: list[tuple[str, str, str]]) -> None:
     Plain HTML with inherited colours so it follows the light/dark theme and
     wraps on narrow screens instead of truncating like st.metric does.
     """
-    tiles = "".join(
-        f'<div style="flex:1 1 150px;min-width:140px;padding:10px 14px;'
-        f'border:1px solid rgba(128,128,128,0.35);border-radius:8px">'
-        f'<div style="font-size:0.78rem;opacity:0.7">{label}</div>'
-        f'<div style="font-size:1.45rem;font-weight:600;line-height:1.3">{value}</div>'
-        f'<div style="font-size:0.74rem;opacity:0.6">{note}&nbsp;</div></div>'
+    figs = "".join(
+        f'<div class="fl-fig"><div class="l">{label}</div><div class="v">{value}</div>'
+        f'<div class="n">{note}&nbsp;</div></div>'
         for label, value, note in items)
-    st.markdown(f'<div style="display:flex;flex-wrap:wrap;gap:10px;margin:4px 0 14px 0">{tiles}</div>',
-                unsafe_allow_html=True)
+    st.markdown(f'<div class="fl-figs">{figs}</div>', unsafe_allow_html=True)
 
 
 def read_report(data: SpectraSet, cond_name: str, cond_unit: str) -> pd.DataFrame:
@@ -419,7 +451,8 @@ def surface_figure(data, y_mode, cond_title, colorscale):
 # sidebar: data + settings
 # --------------------------------------------------------------------------
 inject_style()
-st.sidebar.markdown(f'<div class="fl-brand">〰️ {APP_NAME}<small>Explore fiber-sensor spectra: map, '
+brand_slot = st.sidebar.empty()
+brand_slot.markdown(f'<div class="fl-brand">{APP_NAME}<small>Explore fiber-sensor spectra: map, '
                     'peaks, fringe tracking, calibration.</small></div>', unsafe_allow_html=True)
 
 st.sidebar.header("1 · Data")
@@ -434,7 +467,15 @@ if source == "Upload a CSV file":
     upload = st.sidebar.file_uploader("Spectra file", type=["csv", "txt", "tsv", "dat"],
                                       help="CSV / TXT / TSV / DAT, up to Streamlit's upload limit (200 MB).")
     if upload is None:
-        hero("fringe analysis for SMS fiber sensors")
+        example = None
+        if EXAMPLE_CSV.exists():
+            try:
+                example = load_data(None, ".csv", None, None, example_stamp)
+            except Exception:  # noqa: BLE001 - the guide works without the example
+                example = None
+        hero("fringe analysis for SMS fiber sensors",
+             fringe_strip(example.wavelengths, example.spectra[0]) if example is not None else "",
+             "The example run's first spectrum: every bright or dark band is one interference fringe." if example is not None else "")
         intro, what = st.columns([1.1, 1])
         intro.markdown("**Upload a spectra file in the sidebar to begin.**\n\n"
                        "A run is a CSV of transmission spectra recorded while a condition — "
@@ -446,12 +487,6 @@ if source == "Upload a CSV file":
                       "- each interference fringe tracked through the run\n"
                       "- linear and curved calibration, sensitivity per fringe\n"
                       "- CSV export of all of it")
-        example = None
-        if EXAMPLE_CSV.exists():
-            try:
-                example = load_data(None, ".csv", None, None, example_stamp)
-            except Exception:  # noqa: BLE001 - the guide works without the example
-                example = None
         format_guide(example, key="welcome")
         st.stop()
     file_bytes, suffix, file_name = upload.getvalue(), Path(upload.name).suffix or ".csv", upload.name
@@ -516,7 +551,12 @@ tracked = table[table["locked_pct"] >= min_lock]
 # --------------------------------------------------------------------------
 # header
 # --------------------------------------------------------------------------
-hero(f"{file_name} · layout: {data.layout} · {len(data)} spectra × {len(data.wavelengths)} wavelengths")
+strip = fringe_strip(data.wavelengths, data.spectra[0])
+hero(f"{file_name} — {len(data)} spectra, {len(data.wavelengths)} wavelengths, layout {data.layout}", strip,
+     f"First spectrum, {data.wavelengths.min():.0f}–{data.wavelengths.max():.0f} nm, as a band: "
+     "bright and dark stripes are the fringes the tracker follows.")
+brand_slot.markdown(f'<div class="fl-brand">{APP_NAME}{strip}<small>Explore fiber-sensor spectra: map, '
+                    'peaks, fringe tracking, calibration.</small></div>', unsafe_allow_html=True)
 stat_strip([
     ("Spectra", f"{len(data)}", f"one every {np.median(np.diff(data.time)):.0f} s" if len(data) > 1 else ""),
     ("Wavelength (nm)", f"{data.wavelengths.min():.0f}–{data.wavelengths.max():.0f}",
