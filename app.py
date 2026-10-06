@@ -13,6 +13,7 @@ or, for development,
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import tempfile
 from dataclasses import replace
@@ -24,7 +25,8 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from sms_analysis import detect_extrema, fit_sensitivity, load_sms_csv, track_all_extrema
+from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_sms_csv,
+                          track_all_extrema)
 from sms_analysis.io import SpectraSet
 
 APP_NAME = "FringeLab"
@@ -33,10 +35,104 @@ EXAMPLE_CSV = ROOT / "data" / "data.csv"
 
 RED, BLUE = "#ff0000", "#0000ff"        # Igor Pro trace colours
 PEAK_COLOR, DIP_COLOR = "#C4402F", "#2E5FA3"
+LINEAR_COLOR, QUAD_COLOR = "#8c8c8c", "#2E5FA3"   # calibration models
 MAX_MAP_ROWS, MAX_MAP_COLS = 1200, 2000  # display resolution of the heatmap
 MAX_3D_ROWS, MAX_3D_COLS = 150, 300
 
-st.set_page_config(page_title=APP_NAME, page_icon="〰️", layout="wide")
+st.set_page_config(page_title=APP_NAME, page_icon="〰️", layout="wide",
+                   menu_items={"About": f"{APP_NAME} — fringe analysis for SMS fiber sensors."})
+
+
+# --------------------------------------------------------------------------
+# file-format guide
+# --------------------------------------------------------------------------
+FORMAT_RULES = """
+**Base layout** — one row per spectrum, in acquisition order:
+
+| column | header | content |
+|---|---|---|
+| 1 | `Temperature (°C)` — or any condition: `Strain`, `Load (g)`, … | value of the condition when the spectrum was taken |
+| 2 | `Time (s)` | seconds since the start of the run |
+| 3 … | the **wavelength in nm** (`1475.0`, `1475.1`, …) | transmittance (or power) at that wavelength |
+
+Headers in rows 3… must be plain numbers between 200 and 5000 (nm). The first
+two columns are found by their header names (`temp`, `°C`, `time`, `sec`, …);
+if they have no names, the first two non-wavelength columns are taken as
+condition and time, in that order.
+
+**Also accepted**
+
+- `;` or tab separators and decimal commas (`0,769`).
+- An index column (`Unnamed: 0`) or other extra columns — ignored.
+- No time column — the spectrum number is used instead.
+- No condition column — maps, peaks and tracking work; calibration is skipped.
+- Transposed files: wavelengths down the first column, one spectrum per further
+  column (headers may be the times). This layout carries no condition values.
+
+Values are read as plain numbers; keep units out of the cells (`0.769`, not `0.769 dB`).
+"""
+
+
+def template_csv(example: SpectraSet | None) -> str:
+    """A small CSV in the base layout, taken from the example run when present."""
+    if example is not None and len(example) >= 3 and example.has_temperature:
+        wl = example.wavelengths
+        cols = np.arange(0, len(wl), max(1, len(wl) // 10))[:11]
+        rows = np.linspace(0, len(example) - 1, 5).astype(int)
+        df = pd.DataFrame(example.spectra[np.ix_(rows, cols)].round(6), columns=[f"{wl[c]:g}" for c in cols])
+        df.insert(0, "Time (s)", example.time[rows].round(1))
+        df.insert(0, "Temperature (°C)", example.temperature[rows].round(2))
+    else:
+        wl = np.arange(1500.0, 1500.6, 0.1)
+        df = pd.DataFrame(np.full((3, len(wl)), 0.5), columns=[f"{w:g}" for w in wl])
+        df.insert(0, "Time (s)", [0.0, 23.5, 47.0])
+        df.insert(0, "Temperature (°C)", [25.0, 25.5, 26.0])
+    return df.to_csv(index=False)
+
+
+def format_guide(example: SpectraSet | None, key: str) -> None:
+    """Render the expected-file-format guide with a downloadable template."""
+    st.markdown(FORMAT_RULES)
+    csv = template_csv(example)
+    st.caption("First rows of a file in the base layout:")
+    st.dataframe(pd.read_csv(io.StringIO(csv)), hide_index=True, width="stretch")
+    st.download_button("Download this template (CSV)", csv, "fringelab_template.csv", "text/csv",
+                       key=f"tpl_{key}")
+
+
+def stat_strip(items: list[tuple[str, str, str]]) -> None:
+    """Key numbers in a wrapping row of tiles (label, value, note).
+
+    Plain HTML with inherited colours so it follows the light/dark theme and
+    wraps on narrow screens instead of truncating like st.metric does.
+    """
+    tiles = "".join(
+        f'<div style="flex:1 1 150px;min-width:140px;padding:10px 14px;'
+        f'border:1px solid rgba(128,128,128,0.35);border-radius:8px">'
+        f'<div style="font-size:0.78rem;opacity:0.7">{label}</div>'
+        f'<div style="font-size:1.45rem;font-weight:600;line-height:1.3">{value}</div>'
+        f'<div style="font-size:0.74rem;opacity:0.6">{note}&nbsp;</div></div>'
+        for label, value, note in items)
+    st.markdown(f'<div style="display:flex;flex-wrap:wrap;gap:10px;margin:4px 0 14px 0">{tiles}</div>',
+                unsafe_allow_html=True)
+
+
+def read_report(data: SpectraSet, cond_name: str, cond_unit: str) -> pd.DataFrame:
+    """How the loader interpreted the file, as a two-column table."""
+    wl = data.wavelengths
+    step = np.median(np.diff(wl)) if len(wl) > 1 else np.nan
+    dt = np.median(np.diff(data.time)) if len(data) > 1 else np.nan
+    rows = [
+        ("Layout", data.layout + (" (rows = wavelengths, columns = spectra)" if data.layout == "transposed" else "")),
+        ("Spectra (rows)", f"{len(data)}"),
+        ("Wavelength columns", f"{len(wl)} · {wl.min():.2f}–{wl.max():.2f} nm · step {step:.3f} nm"),
+        ("Time", f"{data.time.min():.1f}–{data.time.max():.1f} s · median step {dt:.1f} s"),
+        (cond_name, (f"{np.nanmin(data.temperature):.2f}–{np.nanmax(data.temperature):.2f} {cond_unit}"
+                     if data.has_temperature else "not found — calibration skipped")),
+        ("Transmittance", f"{np.nanmin(data.spectra):.3f}–{np.nanmax(data.spectra):.3f} · "
+                          f"{int(np.isnan(data.spectra).sum())} empty cells"),
+    ]
+    return pd.DataFrame(rows, columns=["item", "as read"])
 
 
 # --------------------------------------------------------------------------
@@ -81,17 +177,25 @@ def fringe_table(tracks: dict[str, pd.DataFrame], has_cond: bool) -> pd.DataFram
                    end_nm=ok["wavelength"].iloc[-1] if len(ok) else np.nan,
                    shift_nm=(ok["wavelength"].iloc[-1] - ok["wavelength"].iloc[0]) if len(ok) else np.nan,
                    locked_pct=100.0 * len(ok) / max(len(tr), 1),
-                   sensitivity_pm=np.nan, stderr_pm=np.nan, r_squared=np.nan)
+                   sensitivity_pm=np.nan, stderr_pm=np.nan, r_squared=np.nan,
+                   rmse_linear_pm=np.nan, rmse_quadratic_pm=np.nan,
+                   sens_at_min_pm=np.nan, sens_at_max_pm=np.nan)
         if has_cond:
             try:
                 fit = fit_sensitivity(tr)
+                curv = curvature_test(tr)
+                s_lo, s_hi = curv.sensitivity_at_ends_pm
                 row.update(sensitivity_pm=fit.slope * 1e3, stderr_pm=fit.stderr * 1e3,
-                           r_squared=fit.r_squared)
+                           r_squared=fit.r_squared,
+                           rmse_linear_pm=curv.linear.rmse * 1e3,
+                           rmse_quadratic_pm=curv.quadratic.rmse * 1e3,
+                           sens_at_min_pm=s_lo, sens_at_max_pm=s_hi)
             except ValueError:
                 pass
         rows.append(row)
     cols = ["fringe", "kind", "start_nm", "end_nm", "shift_nm", "locked_pct",
-            "sensitivity_pm", "stderr_pm", "r_squared"]
+            "sensitivity_pm", "stderr_pm", "r_squared",
+            "rmse_linear_pm", "rmse_quadratic_pm", "sens_at_min_pm", "sens_at_max_pm"]
     return pd.DataFrame(rows, columns=cols).sort_values("start_nm").reset_index(drop=True)
 
 
@@ -205,18 +309,39 @@ def igor_figure(track, has_cond, cond_title):
     return fig
 
 
-def calibration_figure(track, fit, cond_title, unit):
-    ok = track.dropna(subset=["wavelength", "temperature"])
-    t = np.linspace(ok["temperature"].min(), ok["temperature"].max(), 50)
-    fig = go.Figure()
+def calibration_figure(track, curv, model, cond_title, unit):
+    """Tracked wavelength vs condition with the chosen fit(s) and their residuals."""
+    lin, quad = curv.linear, curv.quadratic
+    ok = quad.residuals(track)
+    t = np.linspace(quad.t_min, quad.t_max, 100)
+    s_lo, s_hi = curv.sensitivity_at_ends_pm
+    models = []
+    if model in ("Linear", "Both"):
+        models.append((lin, LINEAR_COLOR, "dash",
+                       f"linear {lin.coefficients[0] * 1e3:+.1f} pm/{unit} · RMSE {lin.rmse * 1e3:.0f} pm"))
+    if model in ("Quadratic", "Both"):
+        models.append((quad, QUAD_COLOR, "solid",
+                       f"quadratic {s_lo:+.0f} → {s_hi:+.0f} pm/{unit} · RMSE {quad.rmse * 1e3:.0f} pm"))
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.68, 0.32],
+                        vertical_spacing=0.06)
     fig.add_trace(go.Scatter(x=ok["temperature"], y=ok["wavelength"], mode="markers",
-                             name="tracked", marker=dict(size=4, color=PEAK_COLOR, opacity=0.5)))
-    fig.add_trace(go.Scatter(
-        x=t, y=fit.slope * t + fit.intercept, mode="lines", line=dict(color="#333333", width=2),
-        name=f"fit: {fit.slope * 1e3:+.1f} pm/{unit} (R² = {fit.r_squared:.4f})"))
-    fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title=cond_title, yaxis_title="Wavelength (nm)",
-                      legend=dict(orientation="h", y=1.12))
+                             name="tracked", marker=dict(size=4, color=PEAK_COLOR, opacity=0.5),
+                             hovertemplate="%{x:.2f} → %{y:.3f} nm<extra></extra>"), row=1, col=1)
+    for fit, color, dash, name in models:
+        fig.add_trace(go.Scatter(x=t, y=fit.predict(t), mode="lines", name=name,
+                                 line=dict(color=color, width=2, dash=dash),
+                                 hoverinfo="skip"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=ok["temperature"], y=(ok["wavelength"] - fit.predict(ok["temperature"])) * 1e3,
+                                 mode="markers", showlegend=False, name=name.split(" ")[0],
+                                 marker=dict(size=3.5, color=color, opacity=0.6),
+                                 hovertemplate="%{x:.2f} → %{y:+.0f} pm<extra></extra>"), row=2, col=1)
+    fig.add_hline(y=0, line_color="#999999", line_width=1, row=2, col=1)
+    fig.update_yaxes(title_text="Wavelength (nm)", row=1, col=1)
+    fig.update_yaxes(title_text="Residual (pm)", row=2, col=1)
+    fig.update_xaxes(title_text=cond_title, row=2, col=1)
+    fig.update_layout(height=540, margin=dict(l=10, r=10, t=40, b=10),
+                      legend=dict(orientation="h", yanchor="top", y=-0.16, x=0))
     return fig
 
 
@@ -263,18 +388,26 @@ source = st.sidebar.radio("Source", sources, label_visibility="collapsed")
 file_bytes, suffix, file_name = None, ".csv", EXAMPLE_CSV.name
 example_stamp = f"{EXAMPLE_CSV}:{EXAMPLE_CSV.stat().st_mtime_ns}" if EXAMPLE_CSV.exists() else ""
 if source == "Upload a CSV file":
-    upload = st.sidebar.file_uploader("Spectra file", type=["csv", "txt", "tsv", "dat"])
+    upload = st.sidebar.file_uploader("Spectra file", type=["csv", "txt", "tsv", "dat"],
+                                      help="CSV / TXT / TSV / DAT, up to Streamlit's upload limit (200 MB).")
     if upload is None:
         st.title(APP_NAME)
-        st.info(
-            "Upload a spectra file in the sidebar to begin.\n\n"
-            "Expected layout: one row per spectrum, one column per wavelength with the "
-            "wavelength in nm as the column header, plus optional time and condition "
-            "(temperature, strain, …) columns. Transposed files, `;`/tab separators and "
-            "decimal commas are detected automatically."
-        )
+        st.markdown("Upload a spectra file in the sidebar to begin. This is the file layout "
+                    f"{APP_NAME} expects:")
+        example = None
+        if EXAMPLE_CSV.exists():
+            try:
+                example = load_data(None, ".csv", None, None, example_stamp)
+            except Exception:  # noqa: BLE001 - the guide works without the example
+                example = None
+        format_guide(example, key="welcome")
         st.stop()
     file_bytes, suffix, file_name = upload.getvalue(), Path(upload.name).suffix or ".csv", upload.name
+
+with st.sidebar.expander("File format guide"):
+    st.markdown("One row per spectrum: condition, time, then one column per wavelength "
+                "(header = nm). Full rules and a template are on the start page and under "
+                "*How the file was read* above the tabs.")
 
 with st.sidebar.expander("Condition and columns"):
     cond_name = st.text_input("Condition name", "Temperature",
@@ -291,6 +424,8 @@ try:
 except Exception as exc:  # noqa: BLE001 - show any loader problem to the user
     st.title(APP_NAME)
     st.error(f"Could not read **{file_name}**: {exc}")
+    st.markdown("Check the file against the expected layout:")
+    format_guide(None, key="error")
     st.stop()
 
 wl_lo, wl_hi = float(full.wavelengths.min()), float(full.wavelengths.max())
@@ -329,14 +464,22 @@ tracked = table[table["locked_pct"] >= min_lock]
 # header
 # --------------------------------------------------------------------------
 st.title(APP_NAME)
-st.caption(f"**{file_name}** · layout: {data.layout}")
-m = st.columns(5)
-m[0].metric("Spectra", f"{len(data)}")
-m[1].metric("Wavelength", f"{data.wavelengths.min():.1f}–{data.wavelengths.max():.1f} nm")
-m[2].metric("Duration", f"{(data.time.max() - data.time.min()) / 60:.0f} min")
-m[3].metric(cond_name, f"{np.nanmin(data.temperature):.1f} → {np.nanmax(data.temperature):.1f} {cond_unit}"
-            if has_cond else "not in file")
-m[4].metric("Fringes tracked", f"{len(tracked)} / {len(table)}")
+st.caption(f"**{file_name}** · layout: {data.layout} · "
+           f"{len(data)} spectra × {len(data.wavelengths)} wavelengths")
+stat_strip([
+    ("Spectra", f"{len(data)}", f"one every {np.median(np.diff(data.time)):.0f} s" if len(data) > 1 else ""),
+    ("Wavelength (nm)", f"{data.wavelengths.min():.0f}–{data.wavelengths.max():.0f}",
+     f"{len(data.wavelengths)} points · {np.median(np.diff(data.wavelengths)):.3g} nm step"),
+    ("Duration", f"{(data.time.max() - data.time.min()) / 60:.0f} min", ""),
+    (cond_name, (f"{data.temperature[0]:.1f} → {data.temperature[-1]:.1f} {cond_unit}" if has_cond else "not in file"),
+     f"{np.nanmin(data.temperature):.1f}–{np.nanmax(data.temperature):.1f} {cond_unit}" if has_cond else ""),
+    ("Fringes tracked", f"{len(tracked)} / {len(table)}", f"locked ≥ {min_lock} % of spectra"),
+])
+with st.expander("How the file was read · file format guide"):
+    st.dataframe(read_report(full, cond_name, cond_unit), hide_index=True, width="stretch")
+    st.markdown("If a column was taken for the wrong thing, name it under *Condition and columns* "
+                "in the sidebar (header name or 0-based column number).")
+    format_guide(full if full.has_temperature else None, key="loaded")
 if not has_cond:
     st.warning(f"No {cond_name.lower()} column was found, so calibration (sensitivity) is skipped. "
                "Maps, peaks and tracking still work. If the file has one, name it under "
@@ -420,13 +563,29 @@ with tab_track:
         track = tracks[label]
         left, right = st.columns(2)
         left.plotly_chart(igor_figure(track, has_cond, cond_title), width="stretch")
+        left.caption("Igor-style view: tracked wavelength (red, left axis) and the condition "
+                     "(blue, right axis) against time.")
         if has_cond:
             try:
                 fit = fit_sensitivity(track)
-                right.plotly_chart(calibration_figure(track, fit, cond_title, cond_unit),
+                curv = curvature_test(track)
+                model = right.radio("Calibration model", ["Both", "Linear", "Quadratic"],
+                                    horizontal=True, key="cal_model",
+                                    help="Linear: one sensitivity for the whole run. Quadratic: the "
+                                         "sensitivity changes along the run, as it does close to the "
+                                         "critical wavelength. The lower panel shows measured − fitted.")
+                right.plotly_chart(calibration_figure(track, curv, model, cond_title, cond_unit),
                                    width="stretch")
-                right.caption(f"Sensitivity {fit.slope * 1e3:+.1f} ± {fit.stderr * 1e3:.1f} pm/{cond_unit}, "
-                              f"R² = {fit.r_squared:.4f}, {fit.n_points} points.")
+                s_lo, s_hi = curv.sensitivity_at_ends_pm
+                q = curv.quadratic
+                right.caption(
+                    f"Linear: {fit.slope * 1e3:+.1f} ± {fit.stderr * 1e3:.1f} pm/{cond_unit}, "
+                    f"R² = {fit.r_squared:.4f}, RMSE {curv.linear.rmse * 1e3:.0f} pm, {fit.n_points} points. "
+                    f"Quadratic: RMSE {q.rmse * 1e3:.0f} pm "
+                    f"({curv.rmse_improvement:+.0%} vs linear); local sensitivity "
+                    f"{s_lo:+.0f} pm/{cond_unit} at {q.t_min:.1f} {cond_unit} and "
+                    f"{s_hi:+.0f} pm/{cond_unit} at {q.t_max:.1f} {cond_unit}; "
+                    f"curvature {curv.curvature_pm_per_C2:+.2f} pm/{cond_unit}².")
             except ValueError:
                 right.info("Too few locked points to fit this fringe.")
         else:
@@ -442,11 +601,20 @@ with tab_sens:
         st.info("No fringe passes the R² threshold.")
     else:
         st.info(f"Sensitivity needs a {cond_name.lower()} column; the table lists the tracked fringes only.")
+    if has_cond:
+        t_lo, t_hi = np.nanmin(data.temperature), np.nanmax(data.temperature)
+        st.caption(f"Linear columns: one sensitivity for the whole run. Curved columns: a quadratic "
+                   f"calibration, its RMSE against the linear one, and the local sensitivity at "
+                   f"{t_lo:.1f} and {t_hi:.1f} {cond_unit}. A clearly lower quadratic RMSE means the "
+                   f"sensitivity changed along the run (fringes close to the critical wavelength).")
     st.dataframe(
         shown.rename(columns={"sensitivity_pm": f"sensitivity (pm/{cond_unit})",
                               "stderr_pm": f"± (pm/{cond_unit})", "locked_pct": "locked (%)",
                               "start_nm": "start (nm)", "end_nm": "end (nm)", "shift_nm": "shift (nm)",
-                              "r_squared": "R²"}),
+                              "r_squared": "R²", "rmse_linear_pm": "RMSE linear (pm)",
+                              "rmse_quadratic_pm": "RMSE quadratic (pm)",
+                              "sens_at_min_pm": f"S at min {cond_unit} (pm)",
+                              "sens_at_max_pm": f"S at max {cond_unit} (pm)"}),
         hide_index=True, width="stretch",
         column_config={"start (nm)": st.column_config.NumberColumn(format="%.2f"),
                        "end (nm)": st.column_config.NumberColumn(format="%.2f"),
@@ -454,7 +622,11 @@ with tab_sens:
                        "locked (%)": st.column_config.NumberColumn(format="%.0f"),
                        f"sensitivity (pm/{cond_unit})": st.column_config.NumberColumn(format="%+.1f"),
                        f"± (pm/{cond_unit})": st.column_config.NumberColumn(format="%.1f"),
-                       "R²": st.column_config.NumberColumn(format="%.4f")})
+                       "R²": st.column_config.NumberColumn(format="%.4f"),
+                       "RMSE linear (pm)": st.column_config.NumberColumn(format="%.0f"),
+                       "RMSE quadratic (pm)": st.column_config.NumberColumn(format="%.0f"),
+                       f"S at min {cond_unit} (pm)": st.column_config.NumberColumn(format="%+.0f"),
+                       f"S at max {cond_unit} (pm)": st.column_config.NumberColumn(format="%+.0f")})
 
 # ---- 3-D ------------------------------------------------------------------
 with tab_3d:

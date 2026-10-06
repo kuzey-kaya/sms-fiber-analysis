@@ -7,11 +7,12 @@ Usage:
     python scripts/run_analysis.py path/to/other.csv --outdir figures
 
 Outputs (in --outdir, default figures/):
-    fig1..fig7                  figures (fig5/fig6/fig7 need a temperature column)
+    fig1..fig7, fig20           figures (fig5/fig6/fig7/fig20 need a temperature column)
     tracked_all_long.csv        every tracked fringe: fringe, time, temperature, wavelength, value
     tracked_all_wide.csv        every tracked fringe: one wavelength column per fringe
     tracked_feature.csv         the single fringe used for the detailed plots
-    sensitivity_map.csv         per-fringe sensitivity table (needs temperature)
+    sensitivity_map.csv         per-fringe sensitivity table incl. linear-vs-quadratic
+                                calibration columns (needs temperature)
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sms_analysis import (  # noqa: E402
+    curvature_test,
     fit_sensitivity,
     load_sms_csv,
     sensitivity_map,
@@ -36,6 +38,7 @@ from sms_analysis import (  # noqa: E402
     track_feature,
 )
 from sms_analysis.plotting import (  # noqa: E402
+    plot_calibration_models,
     plot_correlation,
     plot_sensitivity_map,
     plot_spectra_overlay,
@@ -121,6 +124,12 @@ def main() -> None:
         print(f"\nSensitivity across the spectrum ({len(good)}/{len(smap)} fringes with R² ≥ 0.90):")
         print(good[["label", "start_wavelength", "sensitivity_pm_per_C", "r_squared", "n_points"]]
               .to_string(index=False))
+        curved = good[good["rmse_quadratic_pm"] < 0.8 * good["rmse_linear_pm"]]
+        print(f"\nCurved calibration (quadratic RMSE < 80 % of linear) for {len(curved)}/{len(good)} "
+              f"fringes; local sensitivity at the coldest / warmest temperature:")
+        print(curved[["label", "rmse_linear_pm", "rmse_quadratic_pm",
+                      "sensitivity_at_tmin_pm_per_C", "sensitivity_at_tmax_pm_per_C"]]
+              .round(1).to_string(index=False))
 
         ax = plot_sensitivity_map(good)
         ax.set_title("Fringe sensitivity vs wavelength")
@@ -166,6 +175,16 @@ def main() -> None:
         ax = plot_correlation(track, fit,
                               title=f"Temperature calibration of the {kind} near {w0:.0f} nm")
         plt.tight_layout(); plt.savefig(outdir / "fig5_correlation.png"); plt.close()
+
+        # --- Fig 20: linear vs quadratic calibration with residuals ---------
+        curv = curvature_test(track)
+        s_lo, s_hi = curv.sensitivity_at_ends_pm
+        print(f"Quadratic calibration: RMSE {curv.linear.rmse * 1e3:.0f} -> {curv.quadratic.rmse * 1e3:.0f} pm, "
+              f"local sensitivity {s_lo:+.0f} pm/degC at {curv.quadratic.t_min:.1f} degC, "
+              f"{s_hi:+.0f} pm/degC at {curv.quadratic.t_max:.1f} degC")
+        plot_calibration_models(track, curv,
+                                title=f"Linear vs quadratic calibration of the {kind} near {w0:.0f} nm")
+        plt.tight_layout(); plt.savefig(outdir / "fig20_calibration_models.png"); plt.close()
 
         # --- Fig 7: Igor Pro-style rendering of the tracking graph -----------
         from sms_analysis.igor_style import plot_igor_tracking  # noqa: E402

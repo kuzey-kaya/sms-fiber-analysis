@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from .analysis import SensitivityFit
+from .analysis import CurvatureTest, SensitivityFit
 from .io import SpectraSet
 from .peaks import detect_extrema
 
@@ -159,3 +159,47 @@ def plot_sensitivity_map(smap: pd.DataFrame, ax: plt.Axes | None = None):
     ax.set_ylabel("Sensitivity (pm/°C)")
     ax.legend(frameon=False)
     return ax
+
+
+def plot_calibration_models(
+    track: pd.DataFrame,
+    curv: CurvatureTest,
+    title: str = "",
+    axes: tuple[plt.Axes, plt.Axes] | None = None,
+):
+    """Linear vs quadratic calibration of one fringe, with the residuals.
+
+    Top: tracked points with both fits.  Bottom: measured minus fitted
+    wavelength for each model, so a systematic bow in the linear residuals
+    (curvature near the critical wavelength) is visible at a glance.
+    """
+    if axes is None:
+        _, axes = plt.subplots(2, 1, figsize=(7, 6.4), sharex=True,
+                               gridspec_kw=dict(height_ratios=[2.2, 1]))
+    ax_fit, ax_res = axes
+    lin, quad = curv.linear, curv.quadratic
+    ok = quad.residuals(track)
+    t = np.linspace(quad.t_min, quad.t_max, 100)
+    s_lo, s_hi = curv.sensitivity_at_ends_pm
+
+    ax_fit.plot(ok["temperature"], ok["wavelength"], ".", ms=3,
+                color=COLOR_WAVELENGTH, alpha=0.4, label="Tracked feature")
+    ax_fit.plot(t, lin.predict(t), "--", color="#888888", lw=1.4,
+                label=f"Linear: {lin.coefficients[0] * 1e3:+.1f} pm/°C, RMSE {lin.rmse * 1e3:.0f} pm")
+    ax_fit.plot(t, quad.predict(t), "-", color=COLOR_FIT, lw=1.6,
+                label=f"Quadratic: {s_lo:+.0f} → {s_hi:+.0f} pm/°C "
+                      f"({quad.t_min:.0f}→{quad.t_max:.0f} °C), RMSE {quad.rmse * 1e3:.0f} pm")
+    ax_fit.set_ylabel("Wavelength (nm)")
+    ax_fit.legend(frameon=False, fontsize=8.5)
+    if title:
+        ax_fit.set_title(title)
+
+    ax_res.axhline(0, color="#999999", lw=0.8)
+    ax_res.plot(ok["temperature"], (ok["wavelength"] - lin.predict(ok["temperature"])) * 1e3,
+                ".", ms=3, color="#888888", alpha=0.6, label="Linear residual")
+    ax_res.plot(ok["temperature"], ok["residual"] * 1e3, ".", ms=3,
+                color=COLOR_TEMPERATURE, alpha=0.6, label="Quadratic residual")
+    ax_res.set_xlabel("Temperature (°C)")
+    ax_res.set_ylabel("Residual (pm)")
+    ax_res.legend(frameon=False, fontsize=8.5, ncol=2)
+    return axes

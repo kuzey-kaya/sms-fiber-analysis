@@ -65,13 +65,18 @@ It is a continuous cooldown — no setpoint steps.
   it down — ~7 s instead of ~18 s, outputs byte-identical; takes `max_step`), `track_feature_legacy` (exact reproduction of the old Colab tracker:
   4 nm window, unguarded refine on raw data → fringe-hops; optional median filter),
   `track_band_extremum` (strongest extremum in a fixed band → staircase from identity hops).
-- `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `sensitivity_map` (table; returns
-  empty frame when no temperature).
+- `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
+  (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
+  `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,
+  `sensitivity_at_ends_pm`, nested F-test p-value — overconfident because consecutive spectra are
+  correlated, use it only to rank), `sensitivity_map` (table incl. the curved columns; returns
+  empty frame when no temperature). Added 2026-10-06.
 - `sms_analysis/plotting.py`, `igor_style.py` (Igor Pro look: red λ left axis, blue T right axis),
   `staircase.py` (temperature-bin plateau averages).
 - `scripts/run_analysis.py` — main pipeline; writes `tracked_all_long.csv` (fringe, time, temperature,
   wavelength, value) and `tracked_all_wide.csv` (one column per fringe) for ALL tracked fringes,
-  `tracked_feature.csv` for the detailed one, `sensitivity_map.csv`, fig1–7.
+  `tracked_feature.csv` for the detailed one, `sensitivity_map.csv`, fig1–7, fig20
+  (`plot_calibration_models`: linear vs quadratic calibration of the detailed fringe + residuals).
 - `scripts/peak_inventory.py` — `all_peaks_long.csv` (every extremum of every spectrum),
   `all_peaks_tracked_wide.csv`, `fringe_directions.csv`, fig13 (trajectory map), fig14 (interval-sampled staircase).
 - `scripts/staircase_views.py` — regenerates fig9–12 in the Igor style: `fig9_staircase_3C.png`
@@ -95,7 +100,12 @@ It is a continuous cooldown — no setpoint steps.
   tracked-fringe overlay), spectrum & peaks, fringe tracking (all shifts + one fringe Igor-style +
   calibration), sensitivity, 3-D surface, export (CSV/JSON). Uses only package functions; results
   are cached per file + settings. "Tracked" in the app = locked ≥ 90 % of frames (21/24 on
-  data/data.csv; the scripts' 22/24 counts R² ≥ 0.90).
+  data/data.csv; the scripts' 22/24 counts R² ≥ 0.90). 2026-10-06 additions: file-format guide
+  (`FORMAT_RULES`, `template_csv`, `format_guide`: start page, load-error page and the
+  "How the file was read" expander, with a template CSV cut from the example run), `read_report`
+  (loader diagnosis table), `stat_strip` (HTML key-number tiles that wrap instead of truncating),
+  calibration model radio (Both / Linear / Quadratic) with a residual panel, curved columns in the
+  fringe table. `.streamlit/config.toml` sets only theme options valid in light and dark mode.
 - `launch.py` — starts Streamlit headless on a free port and opens the browser (avoids Streamlit's
   first-run e-mail prompt). `run_app.bat` / `run_app.command` — create `.venv`, install
   `requirements.txt` once (marker `.venv/installed.txt`), then call `launch.py`.
@@ -126,6 +136,9 @@ frame, so larger jumps are tracker artefacts.
 Fringe near 1493 nm: −141 pm/°C vs the group's published −142 pm/°C near 1495 nm
 (Chen et al., Optica Sensing Congress JM4A.8, 2025) — the validation against Igor.
 Most sensitive trackable fringe: dip starting at 1542.3 nm, +359.3 ± 0.7 pm/°C, R² 0.997.
+Its quadratic calibration: RMSE 107 → 49 pm, local sensitivity +414 pm/°C at 22.8 °C and
++283 pm/°C at 44.1 °C, curvature −6.1 pm/°C². 6 of the 22 good fringes have quadratic RMSE
+< 80 % of linear (those nearest λc); far fringes (e.g. dip@1567.7) are linear within noise.
 
 ## Decisions and their reasons
 
@@ -137,8 +150,11 @@ Most sensitive trackable fringe: dip starting at 1542.3 nm, +359.3 ± 0.7 pm/°C
   produce it; step-like traces from this data come only from sampling/binning (fig9, fig14) or
   fringe hops (fig10–12). Given the strain CSV, the pipeline reproduces the slide unchanged.
 - Peak definition: local extremum of the smoothed curve + 3-point parabolic refinement.
-- Linear λ(T) fit per fringe; slight curvature at the ends is physical (sensitivity depends on
-  distance from λc). Piecewise/quadratic fit is an easy extension if asked.
+- Linear λ(T) fit per fringe stays the headline number (comparable with the group's Igor values);
+  the quadratic fit (`curvature_test`) is reported next to it because the curvature is physical
+  (sensitivity depends on distance from λc), and its two end-point sensitivities say how much.
+- Backup of the state before the 2026-10-06 redesign: tag `v0.1-before-redesign` and branch
+  `backup/2026-10-06-before-redesign` (pushed to origin).
 
 ## Literature anchors (already cited in the report and deck)
 

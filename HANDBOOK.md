@@ -152,9 +152,12 @@ GitHub's free monthly allowance is limited.
 
 ## 5. Using your own data
 
-- **In the app:** sidebar → *1 · Data* → **Upload a CSV file**. Any layout the
-  loader understands works (see *Data format* in the README). For strain or load
-  runs, set the condition name, unit and columns under *Condition and columns*.
+- **In the app:** sidebar → *1 · Data* → **Upload a CSV file**. The start page
+  shows the expected layout and offers a template CSV to download; after loading,
+  *How the file was read* (above the tabs) reports how each column was
+  interpreted. Any layout the loader understands works (see *Data format* in the
+  README). For strain or load runs, set the condition name, unit and columns
+  under *Condition and columns*.
   An uploaded file is processed by the computer that runs the app; with 4b or 4c
   that is a cloud server.
 - **As the default example:** replace `data/data.csv` with your file.

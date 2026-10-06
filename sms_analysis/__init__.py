@@ -7,7 +7,7 @@ over time -> correlate wavelength shift with temperature -> plot.
 from .io import SpectraSet, load_sms_csv
 from .peaks import detect_extrema, parabolic_refine
 from .tracking import track_feature, track_all_extrema
-from .analysis import fit_sensitivity, sensitivity_map
+from .analysis import curvature_test, fit_calibration, fit_sensitivity, sensitivity_map
 
 __all__ = [
     "SpectraSet",
@@ -17,5 +17,7 @@ __all__ = [
     "track_feature",
     "track_all_extrema",
     "fit_sensitivity",
+    "fit_calibration",
+    "curvature_test",
     "sensitivity_map",
 ]

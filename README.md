@@ -69,8 +69,12 @@ Manual alternative: `pip install -r requirements.txt`, then `python launch.py`.
 |---|---|
 | Spectral map | the whole run as a wavelength × time heatmap (fig3), with the tracked fringes overlaid; vertical axis can be time, spectrum number or the condition; can also show the change from the first spectrum or each spectrum scaled 0–1 |
 | Spectrum & peaks | any single spectrum with its detected peaks/dips; optional overlay of evenly spaced spectra |
-| Fringe tracking | shift of every tracked fringe; one fringe in detail in the Igor style with its calibration fit |
-| Sensitivity | sensitivity of every fringe vs wavelength, and the fringe table |
+| Fringe tracking | shift of every tracked fringe; one fringe in detail in the Igor style with its calibration — linear and/or quadratic fit with the residuals, local sensitivity at both ends of the run |
+| Sensitivity | sensitivity of every fringe vs wavelength, and the fringe table with the linear and quadratic RMSE and the local sensitivity at the coldest and warmest temperature |
+
+The start page (and the *How the file was read* panel above the tabs) shows the
+expected file layout with a downloadable template CSV and a report of how the
+loaded file was interpreted.
 | 3-D view | transmittance as height over wavelength × time/condition (rotatable) |
 | Export | tracked fringes (wide/long CSV), fringe table, the settings used |
 
@@ -157,10 +161,11 @@ python scripts/spectral_3d.py      # fig18-19: 3-D views (+ interactive HTML wit
 | `fig18_3d_spectral_surface.png` | 3-D: spectral map on the floor, each tracked fringe rising with temperature, cooling curve on the back wall (`scripts/spectral_3d.py`) |
 | `fig19_3d_fringe_landscape.png` | 3-D: transmittance as height over wavelength × temperature — ridges/valleys tilting across λc |
 | `fig18_3d_interactive.html` | rotatable version of fig18; written only if `plotly` is installed (`pip3 install plotly`) |
+| `fig20_calibration_models.png` | linear vs quadratic calibration of the detailed fringe with both residual series (`run_analysis.py`) |
 | `tracked_all_long.csv` | every tracked fringe: fringe, time, T, wavelength, value (one row per fringe per frame) |
 | `tracked_all_wide.csv` | every tracked fringe: one wavelength column per fringe, one row per frame |
 | `tracked_feature.csv` | time, T, wavelength, value of the fringe used for the detailed plots |
-| `sensitivity_map.csv` | per-fringe sensitivity table |
+| `sensitivity_map.csv` | per-fringe sensitivity table: linear fit (slope, R², std. error) plus the curved-calibration columns — RMSE of the linear and quadratic fits (pm), curvature (pm/°C²), local sensitivity at the coldest and warmest temperature, F-test p-value |
 | `all_peaks_long.csv` | every detected peak/dip of every spectrum (row, time, T, kind, wavelength, value) |
 | `all_peaks_tracked_wide.csv` | same, identity-resolved: one column per fringe |
 | `fringe_directions.csv` | per fringe: start/end wavelength, drift direction on cooling, sensitivity, R² |
@@ -179,7 +184,7 @@ sms_analysis/
   io.py         load CSV -> SpectraSet (wavelengths, time, temperature, spectra)
   peaks.py      extrema detection + parabolic sub-sample refinement
   tracking.py   windowed fringe tracking with fringe-hop rejection
-  analysis.py   linear λ(T) fits, per-fringe sensitivity table
+  analysis.py   linear and quadratic λ(T) fits, curvature test, per-fringe sensitivity table
   plotting.py   all figures
 scripts/
   run_analysis.py   end-to-end pipeline (CLI)
@@ -194,3 +199,8 @@ scripts/
   Python pipeline reproduces the Igor analysis.
 - Most sensitive reliably-tracked fringe: dip starting at 1542.3 nm,
   **+359 pm/°C**, R² = 0.997 over the full 21 °C range.
+- The calibration of that fringe is visibly curved: a quadratic fit halves the
+  residual (RMSE 107 → 49 pm) and gives a local sensitivity of +414 pm/°C at
+  22.8 °C falling to +283 pm/°C at 44.1 °C — the fringe moves toward the
+  critical wavelength as it cools, so its sensitivity grows. Fringes far from
+  λc (e.g. the dip at 1567.7 nm) are linear to within the noise.

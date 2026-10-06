@@ -1,0 +1,12 @@
+# FringeLab look. Only options that work in both light and dark mode are set,
+# so the app follows the viewer's system theme.
+[theme]
+primaryColor = "#2E5FA3"
+font = "sans-serif"
+baseRadius = "6px"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
