@@ -48,15 +48,17 @@ def font(size: int) -> ImageFont.FreeTypeFont:
 
 def make(size: int) -> Image.Image:
     img = fringes(size, size)
-    # darken the lower-left so the monogram reads on every stripe
+    # a centred plate so the monogram reads on every stripe
+    plate = (int(size * 0.17), int(size * 0.29), int(size * 0.83), int(size * 0.75))
     shade = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ImageDraw.Draw(shade).rounded_rectangle(
-        (int(size * 0.10), int(size * 0.30), int(size * 0.72), int(size * 0.86)),
-        radius=int(size * 0.08), fill=(*NAVY, 215))
+    ImageDraw.Draw(shade).rounded_rectangle(plate, radius=int(size * 0.08), fill=(*NAVY, 215))
     img = Image.alpha_composite(img.convert("RGBA"), shade)
     d = ImageDraw.Draw(img)
     f = font(int(size * 0.40))
-    d.text((int(size * 0.41), int(size * 0.585)), "FL", font=f, fill=INK, anchor="mm")
+    # centre the glyphs' ink box (not the font's line box) inside the plate
+    left, top, right, bottom = d.textbbox((0, 0), "FL", font=f)
+    cx, cy = (plate[0] + plate[2]) / 2, (plate[1] + plate[3]) / 2
+    d.text((cx - (left + right) / 2, cy - (top + bottom) / 2), "FL", font=f, fill=INK)
     out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     out.paste(img, (0, 0), rounded_mask(size, int(size * 0.2)))
     return out
