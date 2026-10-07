@@ -655,9 +655,9 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
     step = dict(duration=int(1000 / fps), redraw=True)
     label_every = max(1, len(rows) // 12)
     fig.update_layout(
-        height=660, margin=dict(l=10, r=10, t=100, b=20),
+        height=700, margin=dict(l=10, r=10, t=100, b=90),
         title=dict(text=stamp(rows[0]), x=0, xanchor="left", y=0.985, yanchor="top"),
-        legend=dict(orientation="h", y=1.0, yanchor="bottom", x=1, xanchor="right", font=dict(size=11)),
+        legend=dict(orientation="h", y=-0.32, yanchor="top", x=0, xanchor="left", font=dict(size=11)),
         updatemenus=[dict(type="buttons", showactive=False, x=0, y=1.0, xanchor="left", yanchor="bottom",
                           direction="right", pad=dict(b=4),
                           buttons=[dict(label="▶ Play", method="animate",
