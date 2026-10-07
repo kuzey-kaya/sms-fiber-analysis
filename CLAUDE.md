@@ -122,15 +122,24 @@ It is a continuous cooldown — no setpoint steps.
 - `sms_analysis/movie.py` — `render_movie` (matplotlib FuncAnimation: spectrum + extrema per frame,
   map with time cursor, one tracked fringe growing in Igor colours; MP4 via ffmpeg if on PATH, else
   GIF via Pillow) and `frame_rows` (every N-th row, last row always included). Asked for by the
-  advisor on 2026-10-06 as the counterpart of Igor Pro's movie export.
+  advisor on 2026-10-06 as the counterpart of Igor Pro's movie export. Options (2026-10-07):
+  `delta` (spectrum − first), `follow_nm` (x-window around the tracked fringe), `trail` (extrema
+  of the previous N frames as fading grey markers, cached per frame), `mark_fringe` (dotted line),
+  big blue condition readout in the spectrum panel.
 - `scripts/make_movie.py` — CLI for it → `figures/movie_run.gif` (`--format mp4`, `--every`, `--fps`,
-  `--track`, `--no-track`); default fringe = most sensitive reliably tracked one.
+  `--track`, `--no-track`, `--delta`, `--follow NM`, `--trail N`, `--no-mark`); default fringe = most
+  sensitive reliably tracked one.
 - `app.py` Movie tab — Plotly animation (`movie_figure`, ≤ 150 frames, ≤ 500 wavelength points per
-  frame, frames update traces 1,2,3,4,5,6; play/pause + time slider) and a cached on-demand GIF
-  render (`movie_gif`) for slides. The map panel is a static viridis PNG layout image
-  (`map_image`), not a Heatmap trace: Plotly's animation redraw dropped the heatmap and the JSON
-  was far heavier. `figures/movie_run.gif` (7.4 MB, 147 frames) is committed once; regenerate only
-  when the analysis changes, each regeneration adds its size to the git history.
+  frame; trace order documented in its docstring, frames update traces 1–8; play/pause + time
+  slider) with the same options under "Movie options" plus `panel` = One fringe / All fringes
+  (static faint shift curves of every tracked fringe + animated current points and cursor) / None,
+  and a cached on-demand GIF render (`movie_gif`) for slides. Frame layouts carry the title, the big
+  readout annotation (re-sent together with the subplot-title annotations, since a frame's
+  `annotations` replaces them all) and, when following, the x-range. The map panel is a static
+  viridis PNG layout image (`map_image`), not a Heatmap trace: Plotly's animation redraw dropped
+  the heatmap and the JSON was far heavier. Figure JSON is ~2–6 MB depending on options.
+  `figures/movie_run.gif` (147 frames) is committed; regenerate only when the analysis changes,
+  each regeneration adds its size to the git history.
 - `scripts/make_icon.py` → `assets/fringelab_icon.png` (+ 64 px): the "FL" monogram over chirped
   fringes; `app.py` uses it as the browser-tab icon (`page_icon`) and inlines it in the sidebar brand line.
 - `HANDBOOK.md` — how to get and run the project per device: Windows, macOS/Linux, tablets

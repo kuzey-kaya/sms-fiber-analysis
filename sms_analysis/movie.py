@@ -47,12 +47,20 @@ def render_movie(
     cond_unit: str = "°C",
     dpi: int = 90,
     progress=None,
+    delta: bool = False,
+    follow_nm: float | None = None,
+    trail: int = 8,
+    mark_fringe: bool = True,
 ) -> Path:
     """Write the animation to ``out`` (.mp4 with ffmpeg, otherwise .gif).
 
     ``track`` (output of ``track_feature``) adds the lower-right panel: the
     tracked wavelength and the condition drawn up to the current frame, in the
-    Igor colours.  ``progress`` is an optional callback ``f(i, n)``.
+    Igor colours.  ``delta`` shows each spectrum minus the first one;
+    ``follow_nm`` makes the spectrum panel a window of ± that many nm around
+    the tracked fringe; ``trail`` leaves the extrema of that many previous
+    frames fading out; ``mark_fringe`` draws a dotted line at the tracked
+    wavelength.  ``progress`` is an optional callback ``f(i, n)``.
     """
     out = Path(out)
     rows = frame_rows(len(data), every)
@@ -68,16 +76,48 @@ def render_movie(
     ax_trk = fig.add_subplot(gs[1, 1])
 
     # --- spectrum panel ---------------------------------------------------
-    ghost, = ax_spec.plot(wl, data.spectra[0], color="#999999", lw=0.8, alpha=0.5, label="first spectrum")
-    line, = ax_spec.plot(wl, data.spectra[0], color="#333333", lw=1.4, label="current spectrum")
-    peaks, = ax_spec.plot([], [], "o", ms=5, color=COLOR_WAVELENGTH, mec="black", mew=0.4, label="peaks")
-    dips, = ax_spec.plot([], [], "v", ms=5, color=COLOR_TEMPERATURE, mec="black", mew=0.4, label="dips")
+    s0 = data.spectra[0]
+
+    def spec_y(r):
+        return data.spectra[r] - s0 if delta else data.spectra[r]
+
+    def ext_of(r):
+        ext = detect_extrema(wl, data.spectra[r], prominence=prominence, distance=distance,
+                             smooth_window=smooth_window)
+        pw, pv, dw, dv = ext.peak_wavelengths, ext.peak_values, ext.dip_wavelengths, ext.dip_values
+        if delta:
+            d = data.spectra[r] - s0
+            pv, dv = np.interp(pw, wl, d), np.interp(dw, wl, d)
+        return pw, pv, dw, dv
+
+    ext_cache: dict[int, tuple] = {}
+
+    if delta:
+        ghost = ax_spec.axhline(0, color="#999999", lw=0.8, alpha=0.6, label="first spectrum (= 0)")
+    else:
+        ghost, = ax_spec.plot(wl, s0, color="#999999", lw=0.8, alpha=0.5, label="first spectrum")
+    line, = ax_spec.plot(wl, spec_y(0), color="#333333", lw=1.4, label="current spectrum")
+    trail_sc = ax_spec.scatter([], [], s=14, color="#8a8a8a", linewidths=0, zorder=2)
+    peaks, = ax_spec.plot([], [], "o", ms=5, color=COLOR_WAVELENGTH, mec="black", mew=0.4, label="peaks", zorder=3)
+    dips, = ax_spec.plot([], [], "v", ms=5, color=COLOR_TEMPERATURE, mec="black", mew=0.4, label="dips", zorder=3)
+    marker = ax_spec.axvline(np.nan, color=IGOR_RED, lw=1.0, ls=":", label="tracked fringe") \
+        if (mark_fringe and track is not None) else None
+    trk_wl = (track["wavelength"].ffill().bfill().to_numpy(float) if track is not None
+              else np.full(len(data), np.nan))
     ax_spec.set_xlim(wl.min(), wl.max())
-    lo, hi = np.nanmin(data.spectra), np.nanmax(data.spectra)
-    ax_spec.set_ylim(lo - 0.04 * (hi - lo), hi + 0.10 * (hi - lo))
+    if delta:
+        d_all = data.spectra[::max(1, len(data) // 100)] - s0
+        lim = float(np.nanpercentile(np.abs(d_all), 99.5)) or 0.1
+        ax_spec.set_ylim(-1.08 * lim, 1.12 * lim)
+        ax_spec.set_ylabel("Transmittance − first spectrum")
+    else:
+        lo, hi = np.nanmin(data.spectra), np.nanmax(data.spectra)
+        ax_spec.set_ylim(lo - 0.04 * (hi - lo), hi + 0.10 * (hi - lo))
+        ax_spec.set_ylabel("Transmittance")
     ax_spec.set_xlabel("Wavelength (nm)")
-    ax_spec.set_ylabel("Transmittance")
     ax_spec.legend(loc="upper right", frameon=False, fontsize=8, ncol=2)
+    readout = ax_spec.text(0.02, 0.97, "", transform=ax_spec.transAxes, va="top", ha="left",
+                           fontsize=15, fontweight="bold", color=IGOR_BLUE) if has_cond else None
     stamp = fig.text(0.5, 0.975, "", ha="center", va="top", fontsize=12, fontweight="bold")
 
     # --- map panel with a time cursor --------------------------------------
@@ -117,11 +157,29 @@ def render_movie(
 
     def draw(k: int):
         r = int(rows[k])
-        y = data.spectra[r]
-        line.set_ydata(y)
-        ext = detect_extrema(wl, y, prominence=prominence, distance=distance, smooth_window=smooth_window)
-        peaks.set_data(ext.peak_wavelengths, ext.peak_values)
-        dips.set_data(ext.dip_wavelengths, ext.dip_values)
+        line.set_ydata(spec_y(r))
+        if k not in ext_cache:
+            ext_cache[k] = ext_of(r)
+        pw, pv, dw, dv = ext_cache[k]
+        peaks.set_data(pw, pv)
+        dips.set_data(dw, dv)
+        # trail of the previous frames' extrema, fading out
+        tx, ty, ta = [], [], []
+        for j in range(max(0, k - trail), k):
+            if j not in ext_cache:
+                ext_cache[j] = ext_of(int(rows[j]))
+            qw, qv, ew, ev = ext_cache[j]
+            op = 0.08 + 0.5 * (j - (k - trail) + 1) / (trail + 1)
+            tx += list(qw) + list(ew); ty += list(qv) + list(ev); ta += [op] * (len(qw) + len(ew))
+        trail_sc.set_offsets(np.c_[tx, ty] if tx else np.empty((0, 2)))
+        trail_sc.set_alpha(None)
+        trail_sc.set_facecolor([(0.54, 0.54, 0.54, a) for a in ta] if ta else [])
+        if marker is not None and np.isfinite(trk_wl[r]):
+            marker.set_xdata([trk_wl[r], trk_wl[r]])
+        if follow_nm and np.isfinite(trk_wl[r]):
+            ax_spec.set_xlim(trk_wl[r] - follow_nm, trk_wl[r] + follow_nm)
+        if readout is not None:
+            readout.set_text(f"{data.temperature[r]:.2f} {cond_unit}")
         text = f"spectrum {r + 1}/{len(data)} · t = {data.time[r]:.0f} s"
         if has_cond:
             text += f" · {cond_name} = {data.temperature[r]:.2f} {cond_unit}"

@@ -6,6 +6,7 @@ map with a time cursor, and the most sensitive tracked fringe growing in time
 Usage:
     python scripts/make_movie.py                       # data/data.csv -> figures/movie_run.gif
     python scripts/make_movie.py other.csv --format mp4 --every 3 --fps 15 --track 1542.3
+    python scripts/make_movie.py --delta --follow 6 --trail 12     # Δ view, camera on the fringe
 
 MP4 needs ffmpeg on the PATH; otherwise a GIF is written (Pillow).
 """
@@ -38,6 +39,11 @@ def main() -> None:
                         "default: the most sensitive reliably tracked fringe")
     p.add_argument("--track-kind", choices=["peak", "dip"], default="dip")
     p.add_argument("--no-track", action="store_true", help="leave the fringe panel out")
+    p.add_argument("--delta", action="store_true", help="show each spectrum minus the first one")
+    p.add_argument("--follow", type=float, default=None, metavar="NM",
+                   help="camera follows the tracked fringe with a window of +/- NM")
+    p.add_argument("--trail", type=int, default=8, help="previous frames whose extrema fade out (default 8)")
+    p.add_argument("--no-mark", action="store_true", help="no dotted line at the tracked fringe")
     a = p.parse_args()
 
     outdir = Path(a.outdir)
@@ -67,7 +73,8 @@ def main() -> None:
             print(f"  frame {i}/{n}", flush=True)
 
     out = render_movie(data, outdir / f"movie_run.{a.format}", track=track, track_label=label,
-                       every=a.every, fps=a.fps, progress=progress)
+                       every=a.every, fps=a.fps, progress=progress, delta=a.delta, follow_nm=a.follow,
+                       trail=a.trail, mark_fringe=not a.no_mark)
     print(f"written: {out}  ({out.stat().st_size / 1e6:.1f} MB)")
 
 

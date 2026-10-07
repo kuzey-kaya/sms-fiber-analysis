@@ -76,7 +76,7 @@ The start page (and the *How the file was read* panel above the tabs) shows the
 expected file layout with a downloadable template CSV and a report of how the
 loaded file was interpreted.
 | 3-D view | transmittance as height over wavelength × time/condition (rotatable) |
-| Movie | the run animated frame by frame (spectrum + extrema, map cursor, tracked fringe) with play/pause and a time slider; GIF export for slides |
+| Movie | the run animated frame by frame (spectrum + extrema with fading trails, big temperature readout, map cursor, one fringe or all fringes in the lower-right panel) with play/pause, a time slider, Δ view and a camera that follows a fringe; GIF export for slides |
 | Export | tracked fringes (wide/long CSV), fringe table, the settings used |
 
 Sidebar settings: data source (the example run `data/data.csv` or an uploaded
@@ -140,10 +140,18 @@ python scripts/make_movie.py --format mp4 --every 3 --track 1542.3   # MP4 needs
 ```
 
 Each frame shows the current spectrum with its detected peaks and dips (the
-first spectrum as a grey ghost), the spectral map with a cursor at the current
-time, and the most sensitive tracked fringe drawn up to that time in the Igor
-colours, with time and temperature stamped. The same animation runs in the app's
-*Movie* tab with play/pause and a time slider, plus a "Render as GIF" button.
+first spectrum as a grey ghost, the extrema of the previous frames fading out
+behind the current ones, a dotted line at the tracked fringe, the temperature as
+a large readout), the spectral map with a cursor at the current time, and the
+most sensitive tracked fringe drawn up to that time in the Igor colours.
+Options: `--delta` (each spectrum minus the first: only what moved is left),
+`--follow NM` (the camera follows the tracked fringe with a ± NM window),
+`--trail N`, `--no-mark`, `--track`, `--every`, `--fps`.
+
+The same animation runs in the app's *Movie* tab with play/pause and a time
+slider, the options above under *Movie options*, a lower-right panel that can
+show one fringe (Igor style) or every tracked fringe's shift with the current
+points marked, and a "Render as GIF" button for slides.
 
 ### Presentation and 3-D figures
 

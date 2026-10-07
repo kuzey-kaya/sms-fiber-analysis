@@ -489,54 +489,145 @@ def map_image(_data: SpectraSet, max_rows: int = 400, max_cols: int = 600) -> st
     return "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode()
 
 
-def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, fps):
-    """Plotly animation: spectrum + extrema per frame, map cursor, fringe trace growing."""
+FRINGE_PALETTE = ["#2E5FA3", "#C4402F", "#4B9B78", "#E69F00", "#7B5AA6", "#1B9E9E", "#B5651D",
+                  "#6C757D", "#D62E8A", "#8DA300", "#3A86FF", "#FF6B35"]
+
+
+def _delta_at(wl, spec, spec0, x):
+    """Value of (spectrum - first spectrum) at wavelengths x (for extrema in delta mode)."""
+    return np.interp(x, wl, spec - spec0) if len(x) else np.array([])
+
+
+def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, fps, *,
+                 mode="Transmittance", follow_nm=None, trail=8, mark_fringe=True,
+                 panel="One fringe", all_tracks=None, big_readout=True):
+    """Plotly animation of the run.
+
+    Trace order (frames update by index):
+      0 first spectrum (static)      1 current spectrum     2 trail of past extrema
+      3 peaks    4 dips    5 tracked-fringe marker    6 map cursor
+      7/8 lower-right panel: fringe λ + condition, or current points + cursor of all fringes
+      9… static faint shift curves (panel = "All fringes")
+    """
     wl = data.wavelengths
     sc = max(1, int(np.ceil(len(wl) / MOVIE_MAX_COLS)))
     t_min = data.time / 60.0
     has_cond = data.has_temperature
-    sr = max(1, len(data) // 400)
+    delta = mode == "Change from first spectrum"
+    s0 = data.spectra[0]
+    panel_title = {"One fringe": f"Tracked {track_label}", "All fringes": "All fringes: shift from start"}.get(panel, "")
     fig = make_subplots(rows=2, cols=2, specs=[[{"rowspan": 2}, {}], [None, {"secondary_y": True}]],
                         column_widths=[0.58, 0.42], vertical_spacing=0.16, horizontal_spacing=0.1,
-                        subplot_titles=("", "Spectral map", f"Tracked {track_label}" if track is not None else ""))
+                        subplot_titles=("", "Spectral map", panel_title))
+
+    # tracked wavelength per row, forward-filled for the camera and the marker
+    if track is not None:
+        trk_wl = track["wavelength"].ffill().bfill().to_numpy(float)
+    else:
+        trk_wl = np.full(len(data), np.nan)
+
+    shifts = {}
+    if panel == "All fringes" and all_tracks:
+        for lab, tr in all_tracks.items():
+            w = tr["wavelength"].to_numpy(float)
+            first = w[np.isfinite(w)]
+            shifts[lab] = w - (first[0] if len(first) else np.nan)
+
+    def spec_y(r):
+        y = data.spectra[r]
+        return (y - s0) if delta else y
 
     def frame_traces(k):
         r = rows[k]
         pw, pv, dw, dv = extrema[k]
-        seg = track.iloc[: r + 1] if track is not None else None
-        return [
-            go.Scatter(x=wl[::sc], y=data.spectra[r][::sc], mode="lines", line=dict(color="#444444", width=1.5),
+        if delta:
+            pv, dv = _delta_at(wl, data.spectra[r], s0, pw), _delta_at(wl, data.spectra[r], s0, dw)
+        # trail: extrema of the previous `trail` frames, fading out
+        tx, ty, tsym, top = [], [], [], []
+        for j in range(max(0, k - trail), k):
+            rj = rows[j]
+            qw, qv, ew, ev = extrema[j]
+            if delta:
+                qv, ev = _delta_at(wl, data.spectra[rj], s0, qw), _delta_at(wl, data.spectra[rj], s0, ew)
+            op = 0.08 + 0.5 * (j - (k - trail) + 1) / (trail + 1)
+            tx += list(qw) + list(ew); ty += list(qv) + list(ev)
+            tsym += ["circle"] * len(qw) + ["triangle-down"] * len(ew); top += [op] * (len(qw) + len(ew))
+        w_now = trk_wl[r] if mark_fringe and np.isfinite(trk_wl[r]) else None
+        ylo, yhi = y_range
+        traces = [
+            go.Scatter(x=wl[::sc], y=spec_y(r)[::sc], mode="lines", line=dict(color="#444444", width=1.5),
                        name="current spectrum", hovertemplate="λ %{x:.2f} nm · %{y:.4f}<extra></extra>"),
+            go.Scatter(x=tx, y=ty, mode="markers", name="previous frames", showlegend=False, hoverinfo="skip",
+                       marker=dict(symbol=tsym, size=6, color="#8a8a8a", opacity=top)),
             go.Scatter(x=pw, y=pv, mode="markers", name="peaks",
                        marker=dict(symbol="circle", size=8, color=PEAK_COLOR, line=dict(color="black", width=0.5))),
             go.Scatter(x=dw, y=dv, mode="markers", name="dips",
                        marker=dict(symbol="triangle-down", size=8, color=DIP_COLOR, line=dict(color="black", width=0.5))),
+            go.Scatter(x=[w_now, w_now] if w_now is not None else [], y=[ylo, yhi] if w_now is not None else [],
+                       mode="lines", name="tracked fringe", line=dict(color=RED, width=1.2, dash="dot"),
+                       hovertemplate="tracked fringe · %{x:.3f} nm<extra></extra>" if w_now is not None else None),
             go.Scatter(x=[wl.min(), wl.max()], y=[t_min[r], t_min[r]], mode="lines", name="now",
                        line=dict(color="white", width=2), showlegend=False, hoverinfo="skip"),
-            go.Scatter(x=seg["time"] if seg is not None else [], y=seg["wavelength"] if seg is not None else [],
-                       mode="lines", line=dict(color=RED, width=1.6), name="wavelength", showlegend=False,
-                       connectgaps=False),
-            go.Scatter(x=seg["time"] if (seg is not None and has_cond) else [],
-                       y=seg["temperature"] if (seg is not None and has_cond) else [],
-                       mode="lines", line=dict(color=BLUE, width=1.6), name=cond_name, showlegend=False),
         ]
+        if panel == "All fringes" and shifts:
+            labs = list(shifts)
+            traces += [
+                go.Scatter(x=[data.time[r]] * len(labs), y=[shifts[l][r] for l in labs], mode="markers",
+                           showlegend=False, text=labs, hovertemplate="%{text}<br>%{y:+.3f} nm<extra></extra>",
+                           marker=dict(size=7, color=[FRINGE_PALETTE[i % len(FRINGE_PALETTE)] for i in range(len(labs))],
+                                       line=dict(color="black", width=0.4))),
+                go.Scatter(x=[data.time[r], data.time[r]], y=[shift_lo, shift_hi], mode="lines", showlegend=False,
+                           line=dict(color="#888888", width=1), hoverinfo="skip"),
+            ]
+        else:
+            seg = track.iloc[: r + 1] if (track is not None and panel == "One fringe") else None
+            traces += [
+                go.Scatter(x=seg["time"] if seg is not None else [], y=seg["wavelength"] if seg is not None else [],
+                           mode="lines", line=dict(color=RED, width=1.6), name="wavelength", showlegend=False,
+                           connectgaps=False),
+                go.Scatter(x=seg["time"] if (seg is not None and has_cond) else [],
+                           y=seg["temperature"] if (seg is not None and has_cond) else [],
+                           mode="lines", line=dict(color=BLUE, width=1.6), name=cond_name, showlegend=False),
+            ]
+        return traces
+
+    # axis ranges first (frame traces need them)
+    if delta:
+        d_all = data.spectra[::max(1, len(data) // 100)] - s0
+        lim = float(np.nanpercentile(np.abs(d_all), 99.5)) or 0.1
+        y_range = (-1.08 * lim, 1.08 * lim)
+    else:
+        lo, hi = np.nanmin(data.spectra), np.nanmax(data.spectra)
+        y_range = (lo - 0.04 * (hi - lo), hi + 0.08 * (hi - lo))
+    if shifts:
+        allv = np.concatenate([v[np.isfinite(v)] for v in shifts.values()] or [np.array([0.0])])
+        shift_lo, shift_hi = float(allv.min()) - 0.3, float(allv.max()) + 0.3
+    else:
+        shift_lo = shift_hi = 0.0
 
     base = frame_traces(0)
-    fig.add_trace(go.Scatter(x=wl[::sc], y=data.spectra[0][::sc], mode="lines", name="first spectrum",
-                             line=dict(color="#aaaaaa", width=1), opacity=0.6, hoverinfo="skip"), row=1, col=1)
-    fig.add_trace(base[0], row=1, col=1)
-    fig.add_trace(base[1], row=1, col=1)
-    fig.add_trace(base[2], row=1, col=1)
+    if delta:
+        fig.add_trace(go.Scatter(x=[wl.min(), wl.max()], y=[0, 0], mode="lines", name="first spectrum (= 0)",
+                                 line=dict(color="#aaaaaa", width=1), hoverinfo="skip"), row=1, col=1)
+    else:
+        fig.add_trace(go.Scatter(x=wl[::sc], y=s0[::sc], mode="lines", name="first spectrum",
+                                 line=dict(color="#aaaaaa", width=1), opacity=0.6, hoverinfo="skip"), row=1, col=1)
+    for tr in base[:5]:
+        fig.add_trace(tr, row=1, col=1)
     # The map is a static picture behind the cursor (a Heatmap trace is dropped by
     # Plotly's animation redraw and makes every frame heavy).
     fig.add_layout_image(source=map_image(data), xref="x2", yref="y2", x=wl.min(), y=t_min.max(),
                          sizex=wl.max() - wl.min(), sizey=t_min.max() - t_min.min(),
                          sizing="stretch", layer="below", xanchor="left", yanchor="top")
-    fig.add_trace(base[3], row=1, col=2)
-    fig.add_trace(base[4], row=2, col=2, secondary_y=False)
-    fig.add_trace(base[5], row=2, col=2, secondary_y=True)
-    # traces 1,2,3 (spectrum, peaks, dips), 4 (cursor), 5,6 (track, condition) change per frame
-    animated = [1, 2, 3, 4, 5, 6]
+    fig.add_trace(base[5], row=1, col=2)
+    fig.add_trace(base[6], row=2, col=2, secondary_y=False)
+    fig.add_trace(base[7], row=2, col=2, secondary_y=(panel != "All fringes"))
+    animated = [1, 2, 3, 4, 5, 6, 7, 8]
+    if shifts:
+        for i, (lab, sh) in enumerate(shifts.items()):
+            fig.add_trace(go.Scatter(x=data.time, y=sh, mode="lines", name=lab, showlegend=False, hoverinfo="skip",
+                                     line=dict(color=FRINGE_PALETTE[i % len(FRINGE_PALETTE)], width=1), opacity=0.35,
+                                     connectgaps=False), row=2, col=2, secondary_y=False)
 
     def stamp(r):
         text = f"spectrum {r + 1}/{len(data)} · t = {data.time[r]:.0f} s"
@@ -544,8 +635,21 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
             text += f" · {cond_name} = {data.temperature[r]:.2f} {cond_unit}"
         return text
 
-    frames = [go.Frame(name=str(k), data=frame_traces(k), traces=animated,
-                       layout=go.Layout(title_text=stamp(rows[k])))
+    base_annotations = list(fig.layout.annotations)
+
+    def frame_layout(r):
+        lay = dict(title_text=stamp(r))
+        if big_readout and has_cond:
+            lay["annotations"] = base_annotations + [dict(
+                xref="x domain", yref="y domain", x=0.02, y=0.97, xanchor="left", yanchor="top",
+                text=f"<b>{data.temperature[r]:.2f} {cond_unit}</b><br><span style='font-size:11px'>"
+                     f"{cond_name} · {t_min[r]:.1f} min</span>",
+                showarrow=False, font=dict(size=24, color=BLUE), align="left")]
+        if follow_nm and np.isfinite(trk_wl[r]):
+            lay["xaxis"] = dict(range=[trk_wl[r] - follow_nm, trk_wl[r] + follow_nm], title_text="Wavelength (nm)")
+        return go.Layout(**lay)
+
+    frames = [go.Frame(name=str(k), data=frame_traces(k), traces=animated, layout=frame_layout(rows[k]))
               for k in range(len(rows))]
     fig.frames = frames
     step = dict(duration=int(1000 / fps), redraw=True)
@@ -565,13 +669,18 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
                                   args=[[str(k)], dict(frame=dict(duration=0, redraw=True), mode="immediate")])
                              for k, r in enumerate(rows)])],
     )
-    lo, hi = np.nanmin(data.spectra), np.nanmax(data.spectra)
-    fig.update_xaxes(title_text="Wavelength (nm)", range=[wl.min(), wl.max()], row=1, col=1)
-    fig.update_yaxes(title_text="Transmittance", range=[lo - 0.04 * (hi - lo), hi + 0.08 * (hi - lo)], row=1, col=1)
+    if big_readout and has_cond:
+        fig.update_layout(annotations=frame_layout(rows[0]).annotations)
+    x0 = [trk_wl[rows[0]] - follow_nm, trk_wl[rows[0]] + follow_nm] if (follow_nm and np.isfinite(trk_wl[rows[0]])) \
+        else [wl.min(), wl.max()]
+    fig.update_xaxes(title_text="Wavelength (nm)", range=x0, row=1, col=1)
+    fig.update_yaxes(title_text="Δ transmittance" if delta else "Transmittance", range=list(y_range), row=1, col=1)
     fig.update_xaxes(range=[wl.min(), wl.max()], row=1, col=2)
     fig.update_yaxes(title_text="Time (min)", range=[t_min.min(), t_min.max()], row=1, col=2)
     fig.update_xaxes(title_text="Time (s)", range=[data.time.min(), data.time.max()], row=2, col=2)
-    if track is not None:
+    if panel == "All fringes":
+        fig.update_yaxes(title_text="Shift from start (nm)", range=[shift_lo, shift_hi], row=2, col=2, secondary_y=False)
+    elif track is not None:
         ok = track.dropna(subset=["wavelength"])
         pad = 0.05 * (ok["wavelength"].max() - ok["wavelength"].min() + 1e-9)
         fig.update_yaxes(title_text="λ (nm)", color=RED, range=[ok["wavelength"].min() - pad, ok["wavelength"].max() + pad],
@@ -585,11 +694,13 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
 
 @st.cache_data(show_spinner=False)
 def movie_gif(_data: SpectraSet, _track, data_key: str, track_label: str, every: int, fps: int,
-              prominence: float, distance: int, smooth_window: int, cond_name: str, cond_unit: str) -> bytes:
+              prominence: float, distance: int, smooth_window: int, cond_name: str, cond_unit: str,
+              delta: bool = False, follow_nm: float | None = None, trail: int = 8, mark_fringe: bool = True) -> bytes:
     with tempfile.TemporaryDirectory() as tmp:
         out = render_movie(_data, Path(tmp) / "movie.gif", track=_track, track_label=track_label,
                            every=every, fps=fps, prominence=prominence, distance=distance,
-                           smooth_window=smooth_window, cond_name=cond_name, cond_unit=cond_unit, dpi=80)
+                           smooth_window=smooth_window, cond_name=cond_name, cond_unit=cond_unit, dpi=80,
+                           delta=delta, follow_nm=follow_nm, trail=trail, mark_fringe=mark_fringe)
         return out.read_bytes()
 
 
@@ -880,7 +991,7 @@ with tab_3d:
 # ---- movie ----------------------------------------------------------------
 with tab_movie:
     st.markdown("The run as a movie: the spectrum frame by frame with its peaks and dips, the "
-                "map with a cursor at the current time, and one tracked fringe drawn as time advances "
+                "map with a cursor at the current time, and the tracked fringes drawn as time advances "
                 "— the Igor Pro movie, in the browser.")
     c = st.columns([1.3, 1, 1, 1.2])
     labels = list(table["fringe"])
@@ -888,27 +999,51 @@ with tab_movie:
         ranked = tracked.dropna(subset=["sensitivity_pm"]) if has_cond else tracked
         default_m = (ranked.loc[ranked["sensitivity_pm"].abs().idxmax(), "fringe"]
                      if has_cond and len(ranked) else (tracked["fringe"].iloc[0] if len(tracked) else labels[0]))
-        movie_label = c[0].selectbox("Fringe in the lower-right panel", labels, index=labels.index(default_m),
-                                     key="movie_fringe")
+        movie_label = c[0].selectbox("Fringe to follow", labels, index=labels.index(default_m), key="movie_fringe",
+                                     help="Marked on the spectrum, used by the camera and by the lower-right panel.")
         movie_track = tracks[movie_label]
     else:
         movie_label, movie_track = "", None
     every_m = c[1].slider("Every N-th spectrum", 1, max(2, len(data) // 20), max(1, int(np.ceil(len(data) / MOVIE_MAX_FRAMES))),
                           help="Fewer frames load faster; the last spectrum is always included.")
     fps_m = c[2].slider("Frames per second", 2, 30, 12)
+
+    with st.expander("Movie options", expanded=False):
+        o = st.columns([1.2, 1.2, 1, 1])
+        mode_m = o[0].radio("Show", ["Transmittance", "Change from first spectrum"], key="movie_mode",
+                            help="Δ mode subtracts the first spectrum: only what moved is left.")
+        panel_m = o[1].radio("Lower-right panel", ["One fringe", "All fringes", "None"], key="movie_panel",
+                             help="One fringe: Igor-style wavelength + condition. All fringes: every tracked "
+                                  "fringe's shift from its start, with the current points marked.")
+        camera = o[2].radio("Camera", ["Whole spectrum", "Follow the fringe"], key="movie_cam")
+        follow_m = o[2].slider("Window (± nm)", 1.0, 20.0, 6.0, 0.5, key="movie_win",
+                               disabled=camera != "Follow the fringe")
+        trail_m = o[3].slider("Trail (previous frames)", 0, 20, 8, key="movie_trail",
+                              help="Past peak/dip positions fade out behind the current ones.")
+        mark_m = o[3].checkbox("Mark the followed fringe", True, key="movie_mark")
+        big_m = o[3].checkbox(f"Big {cond_name.lower()} readout", True, key="movie_big", disabled=not has_cond)
+    follow_nm_m = follow_m if (camera == "Follow the fringe" and movie_track is not None) else None
+
     rows_m = tuple(int(r) for r in frame_rows(len(data), every_m, MOVIE_MAX_FRAMES))
     ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window)
-    st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m),
+    all_m = {k: tracks[k] for k in tracked["fringe"]} if panel_m == "All fringes" else None
+    st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m,
+                                 mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,
+                                 panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond),
                     width="stretch")
     st.caption(f"{len(rows_m)} frames. Press ▶ Play, or drag the slider (time in minutes). "
-               "Peaks and dips are detected with the sidebar settings on every frame.")
+               "Peaks and dips are detected with the sidebar settings on every frame; grey markers are "
+               "their positions in the previous frames.")
     with c[3]:
         st.write("")
-        if st.button("Render as GIF for slides", help="Draws every frame with matplotlib; takes a minute."):
+        if st.button("Render as GIF for slides", help="Draws every frame with matplotlib using the options "
+                                                       "above (panel: one fringe); takes a minute."):
             t0 = _time.time()
             with st.spinner("Rendering the GIF…"):
                 gif = movie_gif(data, movie_track, data_key, movie_label, every_m, fps_m,
-                                prominence, distance, smooth_window, cond_name, cond_unit)
+                                prominence, distance, smooth_window, cond_name, cond_unit,
+                                delta=(mode_m == "Change from first spectrum"), follow_nm=follow_nm_m,
+                                trail=trail_m, mark_fringe=mark_m)
             st.session_state["movie_gif"] = (gif, f"{Path(file_name).stem}_movie.gif")
             st.caption(f"{len(gif) / 1e6:.1f} MB in {_time.time() - t0:.0f} s")
         if "movie_gif" in st.session_state:
