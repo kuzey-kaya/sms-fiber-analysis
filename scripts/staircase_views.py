@@ -8,6 +8,7 @@ spacing).
 Produces:
   fig9_staircase_3C.png     - dip starting at 1542.3 nm, averaged in 3 °C
                               temperature bins and drawn as plateaus
+  staircase_plateaus.csv    - the plateau table behind fig9 (Table 2 of the report)
   fig10_legacy_igor.png     - original Colab tracker (track_feature_legacy,
                               default parameters): one fringe-hop at t ≈ 7660 s
   fig11_multistep_igor.png  - legacy tracker with an 8 nm window + median
@@ -66,7 +67,8 @@ def main():
         ax.set_title(f"Step-averaged tracking (real data, {STEP_C:g} °C bins, "
                      f"dip@{START_NM:.0f})", fontsize=10)
         _save(fig, outdir / "fig9_staircase_3C.png")
-        written.append("fig9_staircase_3C.png")
+        steps.round(3).to_csv(outdir / "staircase_plateaus.csv", index=False)
+        written += ["fig9_staircase_3C.png", "staircase_plateaus.csv"]
     else:
         print("no temperature column -> fig9 (temperature-bin staircase) skipped")
 

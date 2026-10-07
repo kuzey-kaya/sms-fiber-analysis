@@ -192,7 +192,7 @@ python scripts/spectral_3d.py      # fig18-19: 3-D views (+ interactive HTML wit
 | `all_peaks_long.csv` | every detected peak/dip of every spectrum (row, time, T, kind, wavelength, value) |
 | `all_peaks_tracked_wide.csv` | same, identity-resolved: one column per fringe |
 | `fringe_directions.csv` | per fringe: start/end wavelength, drift direction on cooling, sensitivity, R² |
-| `staircase_plateaus.csv` | plateau means behind fig9 (usable as calibration points) |
+| `staircase_plateaus.csv` | plateau means behind fig9 (usable as calibration points; Table 2 of the report), written by `scripts/staircase_views.py` |
 
 Note: figs 9–12 and 14 are different *representations* of the same
 continuous cooldown. The steps in figs 10–12 are fringe-hops of the tracker
