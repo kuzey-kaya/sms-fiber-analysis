@@ -7,6 +7,7 @@ Usage:
     python scripts/make_movie.py                       # data/data.csv -> figures/movie_run.gif
     python scripts/make_movie.py other.csv --format mp4 --every 3 --fps 15 --track 1542.3
     python scripts/make_movie.py --delta --follow 6 --trail 12     # Δ view, camera on the fringe
+    python scripts/make_movie.py --phase                            # SM1E.2 phase readout -> movie_phase.gif
 
 MP4 needs ffmpeg on the PATH; otherwise a GIF is written (Pillow).
 """
@@ -23,7 +24,7 @@ matplotlib.use("Agg")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sms_analysis import load_sms_csv, sensitivity_map, track_all_extrema, track_feature  # noqa: E402
-from sms_analysis.movie import render_movie  # noqa: E402
+from sms_analysis.movie import render_movie, render_phase_movie  # noqa: E402
 
 
 def main() -> None:
@@ -44,12 +45,26 @@ def main() -> None:
                    help="camera follows the tracked fringe with a window of +/- NM")
     p.add_argument("--trail", type=int, default=8, help="previous frames whose extrema fade out (default 8)")
     p.add_argument("--no-mark", action="store_true", help="no dotted line at the tracked fringe")
+    p.add_argument("--phase", action="store_true",
+                   help="animate the SM1E.2 phase-unwrapping readout instead (movie_phase.*)")
+    p.add_argument("--lambda-a", type=float, default=1545.0, help="phase movie: first wavelength (nm)")
+    p.add_argument("--lambda-b", type=float, default=1570.0, help="phase movie: second wavelength (nm)")
     a = p.parse_args()
 
     outdir = Path(a.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     data = load_sms_csv(a.csv)
     print(data)
+
+    def progress(i, n):
+        if i == 1 or i % 25 == 0 or i == n:
+            print(f"  frame {i}/{n}", flush=True)
+
+    if a.phase:
+        out = render_phase_movie(data, outdir / f"movie_phase.{a.format}", lambda_a=a.lambda_a,
+                                 lambda_b=a.lambda_b, every=a.every, fps=a.fps, progress=progress)
+        print(f"written: {out}  ({out.stat().st_size / 1e6:.1f} MB)")
+        return
 
     track, label = None, ""
     if not a.no_track:
@@ -67,10 +82,6 @@ def main() -> None:
                 label = max(tracks, key=lambda k: tracks[k]["wavelength"].notna().sum())
             track = tracks[label]
         print(f"fringe panel: {label}")
-
-    def progress(i, n):
-        if i == 1 or i % 25 == 0 or i == n:
-            print(f"  frame {i}/{n}", flush=True)
 
     out = render_movie(data, outdir / f"movie_run.{a.format}", track=track, track_label=label,
                        every=a.every, fps=a.fps, progress=progress, delta=a.delta, follow_nm=a.follow,

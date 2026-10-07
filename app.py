@@ -30,7 +30,7 @@ from plotly.subplots import make_subplots
 from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_sms_csv,
                           track_all_extrema)
 from sms_analysis.io import SpectraSet
-from sms_analysis.movie import frame_rows, render_movie
+from sms_analysis.movie import frame_rows, render_movie, render_phase_movie
 from sms_analysis.phase import (PAPER_LAMBDA_A, PAPER_LAMBDA_B, phase_fits, phase_sensitivity,
                                 phase_series, scan_pairs, tracked_phase_change)
 
@@ -778,6 +778,126 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
     return fig
 
 
+def phase_movie_figure(data, rows, fits, la, lb, fps, cond_name, cond_unit):
+    """Plotly animation of the SM1E.2 readout.
+
+    Traces (frames update 1, 2, 4, 5, 6, 7): 0 spectrum ghost (static) · 1 spectrum ·
+    2 numbered extrema · 3 first-frame cubic (static) · 4 assigned phases · 5 cubic ·
+    6 λc line · 7 readout · 8 condition.
+    """
+    wl = data.wavelengths
+    sc = max(1, int(np.ceil(len(wl) / MOVIE_MAX_COLS)))
+    xs = np.linspace(wl.min(), wl.max(), 200)
+    has_cond = data.has_temperature
+    series = phase_series(data, la, lb, fits=fits)
+    lo, hi = np.nanmin(data.spectra), np.nanmax(data.spectra)
+    allp = np.concatenate([fits[r].phase(xs) for r in rows])
+    p_lo, p_hi = float(allp.min() - 2), float(max(allp.max(), 0) + 3)
+    fit0 = fits[rows[0]]
+
+    fig = make_subplots(rows=2, cols=2, specs=[[{"rowspan": 2}, {}], [None, {"secondary_y": True}]],
+                        column_widths=[0.56, 0.44], vertical_spacing=0.18, horizontal_spacing=0.1,
+                        subplot_titles=("", "Phase from the numbered extrema", "Phase-difference readout"))
+
+    def frame_traces(k):
+        r = rows[k]
+        f = fits[r]
+        y = np.interp(f.wavelengths, wl, data.spectra[r])
+        labs = f.labels()
+        near = [lab if (lab == "λc" or int(lab[2:]) <= 3) else "" for lab in labs]
+        okp = np.isfinite(f.phases)
+        seg = series.iloc[: r + 1]
+        return [
+            go.Scatter(x=wl[::sc], y=data.spectra[r][::sc], mode="lines", name="spectrum",
+                       line=dict(color=PEAK_COLOR, width=1.5), hoverinfo="skip"),
+            go.Scatter(x=f.wavelengths, y=y, mode="markers+text", name="extrema", text=near, customdata=labs,
+                       textposition=["top center" if k == "peak" else "bottom center" for k in f.kinds],
+                       textfont=dict(size=10),
+                       marker=dict(symbol=["circle" if k == "peak" else "triangle-down" for k in f.kinds],
+                                   size=8, color=DIP_COLOR, line=dict(color="black", width=0.5)),
+                       hovertemplate="%{customdata}: %{x:.2f} nm<extra></extra>"),
+            go.Scatter(x=f.wavelengths[okp], y=f.phases[okp], mode="markers", name="Δφ(λ±n) = −(n−1)π",
+                       marker=dict(symbol="circle-open", size=7, color=PEAK_COLOR), hoverinfo="skip"),
+            go.Scatter(x=xs, y=f.phase(xs), mode="lines", name="cubic Δφ(λ)",
+                       line=dict(color=QUAD_COLOR, width=2), hoverinfo="skip"),
+            go.Scatter(x=[f.lambda_c, f.lambda_c], y=[p_lo, p_hi], mode="lines", name="λc",
+                       line=dict(color="#999999", width=1, dash="dash"), hoverinfo="skip"),
+            go.Scatter(x=seg["time"], y=seg["phase_diff"], mode="lines", name="readout", showlegend=False,
+                       line=dict(color=RED, width=1.6)),
+            go.Scatter(x=seg["time"] if has_cond else [], y=seg["temperature"] if has_cond else [],
+                       mode="lines", name=cond_name, showlegend=False, line=dict(color=BLUE, width=1.6)),
+        ]
+
+    base = frame_traces(0)
+    fig.add_trace(go.Scatter(x=wl[::sc], y=data.spectra[rows[0]][::sc], mode="lines", name="first spectrum",
+                             line=dict(color="#aaaaaa", width=1), opacity=0.5, hoverinfo="skip"), row=1, col=1)
+    fig.add_trace(base[0], row=1, col=1)
+    fig.add_trace(base[1], row=1, col=1)
+    fig.add_trace(go.Scatter(x=xs, y=fit0.phase(xs), mode="lines", name="first-frame cubic",
+                             line=dict(color="#bbbbbb", width=1.2), hoverinfo="skip"), row=1, col=2)
+    fig.add_trace(base[2], row=1, col=2)
+    fig.add_trace(base[3], row=1, col=2)
+    fig.add_trace(base[4], row=1, col=2)
+    fig.add_trace(base[5], row=2, col=2, secondary_y=False)
+    fig.add_trace(base[6], row=2, col=2, secondary_y=True)
+    for w in (la, lb):
+        fig.add_vline(x=w, line_dash="dot", line_color="#777777", row=1, col=1)
+    animated = [1, 2, 4, 5, 6, 7, 8]
+
+    def stamp(r):
+        text = f"spectrum {r + 1}/{len(data)} · λc = {fits[r].lambda_c:.2f} nm · readout {series['phase_diff'][r]:.2f} rad"
+        if has_cond:
+            text += f" · {cond_name} = {data.temperature[r]:.2f} {cond_unit}"
+        return text
+
+    fig.frames = [go.Frame(name=str(k), data=frame_traces(k), traces=animated,
+                           layout=go.Layout(title_text=stamp(rows[k]))) for k in range(len(rows))]
+    t_min = data.time / 60.0
+    label_every = max(1, len(rows) // 12)
+    step = dict(duration=int(1000 / fps), redraw=True)
+    fig.update_layout(
+        height=700, margin=dict(l=10, r=10, t=100, b=90),
+        title=dict(text=stamp(rows[0]), x=0, xanchor="left", y=0.985, yanchor="top"),
+        legend=dict(orientation="h", y=-0.32, yanchor="top", x=0, font=dict(size=11)),
+        updatemenus=[dict(type="buttons", showactive=False, x=0, y=1.0, xanchor="left", yanchor="bottom",
+                          direction="right", pad=dict(b=4),
+                          buttons=[dict(label="▶ Play", method="animate",
+                                        args=[None, dict(frame=step, fromcurrent=True, transition=dict(duration=0))]),
+                                   dict(label="❚❚ Pause", method="animate",
+                                        args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])],
+        sliders=[dict(active=0, x=0.0, y=-0.14, len=1.0, pad=dict(t=0), ticklen=4,
+                      currentvalue=dict(visible=True, prefix="t = ", suffix=" min", xanchor="left",
+                                        font=dict(size=12), offset=2),
+                      steps=[dict(method="animate", label=(f"{t_min[r]:.0f}" if k % label_every == 0 else ""),
+                                  value=f"{t_min[r]:.1f}",
+                                  args=[[str(k)], dict(frame=dict(duration=0, redraw=True), mode="immediate")])
+                             for k, r in enumerate(rows)])],
+    )
+    fig.update_xaxes(title_text="Wavelength (nm)", range=[wl.min(), wl.max()], row=1, col=1)
+    fig.update_yaxes(title_text="Transmittance", range=[lo - 0.08 * (hi - lo), hi + 0.12 * (hi - lo)], row=1, col=1)
+    fig.update_xaxes(title_text="Wavelength (nm)", range=[wl.min(), wl.max()], row=1, col=2)
+    fig.update_yaxes(title_text="Δφ (rad)", range=[p_lo, p_hi], row=1, col=2)
+    ok = series.dropna(subset=["phase_diff"])
+    pad = 0.08 * (ok["phase_diff"].max() - ok["phase_diff"].min() + 1e-9)
+    fig.update_xaxes(title_text="Time (s)", range=[data.time.min(), data.time.max()], row=2, col=2)
+    fig.update_yaxes(title_text="rad", color=RED, range=[ok["phase_diff"].min() - pad, ok["phase_diff"].max() + pad],
+                     row=2, col=2, secondary_y=False)
+    if has_cond:
+        fig.update_yaxes(title_text=f"{cond_name} ({cond_unit})", color=BLUE, showgrid=False,
+                         range=[np.nanmin(data.temperature), np.nanmax(data.temperature)],
+                         row=2, col=2, secondary_y=True)
+    return fig
+
+
+@st.cache_data(show_spinner=False)
+def phase_movie_gif(_data: SpectraSet, _fits, data_key: str, la: float, lb: float, every: int, fps: int,
+                    cond_name: str, cond_unit: str) -> bytes:
+    with tempfile.TemporaryDirectory() as tmp:
+        out = render_phase_movie(_data, Path(tmp) / "phase.gif", fits=_fits, lambda_a=la, lambda_b=lb,
+                                 every=every, fps=fps, cond_name=cond_name, cond_unit=cond_unit, dpi=80)
+        return out.read_bytes()
+
+
 @st.cache_data(show_spinner=False)
 def movie_gif(_data: SpectraSet, _track, data_key: str, track_label: str, every: int, fps: int,
               prominence: float, distance: int, smooth_window: int, cond_name: str, cond_unit: str,
@@ -1149,65 +1269,102 @@ with tab_3d:
 
 # ---- movie ----------------------------------------------------------------
 with tab_movie:
-    st.markdown("The run as a movie: the spectrum frame by frame with its peaks and dips, the "
-                "map with a cursor at the current time, and the tracked fringes drawn as time advances "
-                "— the Igor Pro movie, in the browser.")
-    c = st.columns([1.3, 1, 1, 1.2])
-    labels = list(table["fringe"])
-    if labels:
-        ranked = tracked.dropna(subset=["sensitivity_pm"]) if has_cond else tracked
-        default_m = (ranked.loc[ranked["sensitivity_pm"].abs().idxmax(), "fringe"]
-                     if has_cond and len(ranked) else (tracked["fringe"].iloc[0] if len(tracked) else labels[0]))
-        movie_label = c[0].selectbox("Fringe to follow", labels, index=labels.index(default_m), key="movie_fringe",
-                                     help="Marked on the spectrum, used by the camera and by the lower-right panel.")
-        movie_track = tracks[movie_label]
+    movie_kind = st.radio("Movie", ["Spectra and fringes", "Phase readout (SM1E.2)"], horizontal=True,
+                          key="movie_kind", label_visibility="collapsed")
+    if movie_kind == "Phase readout (SM1E.2)":
+        st.markdown("The phase-unwrapping readout as a movie: each frame numbers the extrema λ±n around λc, "
+                    "fits the cubic Δφ(λ) (the first frame's cubic stays as a grey ghost) and draws the "
+                    "readout up to the current time. Watch the extremum at λc change type when a new pair "
+                    "of extrema is born there — the readout does not jump. The wavelength pair is the one "
+                    "chosen in the Phase tab.")
+        la_m = float(st.session_state.get("phase_a", PAPER_LAMBDA_A))
+        lb_m = float(st.session_state.get("phase_b", PAPER_LAMBDA_B))
+        fits_m = phase_fits_cached(data, data_key, prominence, distance, smooth_window)
+        if not any(f is not None for f in fits_m):
+            st.info("No spectrum can be fitted with the phase model in the selected band.")
+        else:
+            c = st.columns([1, 1, 1.2])
+            every_p = c[0].slider("Every N-th spectrum", 1, max(2, len(data) // 20),
+                                  max(1, int(np.ceil(len(data) / MOVIE_MAX_FRAMES))), key="pm_every",
+                                  help="Fewer frames load faster; the last spectrum is always included.")
+            fps_p = c[1].slider("Frames per second", 2, 30, 12, key="pm_fps")
+            rows_p = [int(r) for r in frame_rows(len(data), every_p, MOVIE_MAX_FRAMES) if fits_m[int(r)] is not None]
+            st.plotly_chart(phase_movie_figure(data, rows_p, fits_m, la_m, lb_m, fps_p, cond_name, cond_unit),
+                            width="stretch")
+            st.caption(f"{len(rows_p)} frames · readout |φ({lb_m:g} nm) − φ({la_m:g} nm)|. Press ▶ Play, or drag "
+                       "the slider (time in minutes).")
+            with c[2]:
+                st.write("")
+                if st.button("Render as GIF for slides", key="pm_gif_btn",
+                             help="Draws every frame with matplotlib; takes a minute."):
+                    t0 = _time.time()
+                    with st.spinner("Rendering the GIF…"):
+                        gif = phase_movie_gif(data, fits_m, data_key, la_m, lb_m, every_p, fps_p, cond_name, cond_unit)
+                    st.session_state["phase_movie_gif"] = (gif, f"{Path(file_name).stem}_phase_movie.gif")
+                    st.caption(f"{len(gif) / 1e6:.1f} MB in {_time.time() - t0:.0f} s")
+                if "phase_movie_gif" in st.session_state:
+                    gif, name = st.session_state["phase_movie_gif"]
+                    st.download_button("Download GIF", gif, name, "image/gif", key="pm_gif_dl")
     else:
-        movie_label, movie_track = "", None
-    every_m = c[1].slider("Every N-th spectrum", 1, max(2, len(data) // 20), max(1, int(np.ceil(len(data) / MOVIE_MAX_FRAMES))),
-                          help="Fewer frames load faster; the last spectrum is always included.")
-    fps_m = c[2].slider("Frames per second", 2, 30, 12)
+        st.markdown("The run as a movie: the spectrum frame by frame with its peaks and dips, the "
+                    "map with a cursor at the current time, and the tracked fringes drawn as time advances "
+                    "— the Igor Pro movie, in the browser.")
+        c = st.columns([1.3, 1, 1, 1.2])
+        labels = list(table["fringe"])
+        if labels:
+            ranked = tracked.dropna(subset=["sensitivity_pm"]) if has_cond else tracked
+            default_m = (ranked.loc[ranked["sensitivity_pm"].abs().idxmax(), "fringe"]
+                         if has_cond and len(ranked) else (tracked["fringe"].iloc[0] if len(tracked) else labels[0]))
+            movie_label = c[0].selectbox("Fringe to follow", labels, index=labels.index(default_m), key="movie_fringe",
+                                         help="Marked on the spectrum, used by the camera and by the lower-right panel.")
+            movie_track = tracks[movie_label]
+        else:
+            movie_label, movie_track = "", None
+        every_m = c[1].slider("Every N-th spectrum", 1, max(2, len(data) // 20), max(1, int(np.ceil(len(data) / MOVIE_MAX_FRAMES))),
+                              help="Fewer frames load faster; the last spectrum is always included.")
+        fps_m = c[2].slider("Frames per second", 2, 30, 12)
 
-    with st.expander("Movie options", expanded=False):
-        o = st.columns([1.2, 1.2, 1, 1])
-        mode_m = o[0].radio("Show", ["Transmittance", "Change from first spectrum"], key="movie_mode",
-                            help="Δ mode subtracts the first spectrum: only what moved is left.")
-        panel_m = o[1].radio("Lower-right panel", ["One fringe", "All fringes", "None"], key="movie_panel",
-                             help="One fringe: Igor-style wavelength + condition. All fringes: every tracked "
-                                  "fringe's shift from its start, with the current points marked.")
-        camera = o[2].radio("Camera", ["Whole spectrum", "Follow the fringe"], key="movie_cam")
-        follow_m = o[2].slider("Window (± nm)", 1.0, 20.0, 6.0, 0.5, key="movie_win",
-                               disabled=camera != "Follow the fringe")
-        trail_m = o[3].slider("Trail (previous frames)", 0, 20, 8, key="movie_trail",
-                              help="Past peak/dip positions fade out behind the current ones.")
-        mark_m = o[3].checkbox("Mark the followed fringe", True, key="movie_mark")
-        big_m = o[3].checkbox(f"Big {cond_name.lower()} readout", True, key="movie_big", disabled=not has_cond)
-    follow_nm_m = follow_m if (camera == "Follow the fringe" and movie_track is not None) else None
+        with st.expander("Movie options", expanded=False):
+            o = st.columns([1.2, 1.2, 1, 1])
+            mode_m = o[0].radio("Show", ["Transmittance", "Change from first spectrum"], key="movie_mode",
+                                help="Δ mode subtracts the first spectrum: only what moved is left.")
+            panel_m = o[1].radio("Lower-right panel", ["One fringe", "All fringes", "None"], key="movie_panel",
+                                 help="One fringe: Igor-style wavelength + condition. All fringes: every tracked "
+                                      "fringe's shift from its start, with the current points marked.")
+            camera = o[2].radio("Camera", ["Whole spectrum", "Follow the fringe"], key="movie_cam")
+            follow_m = o[2].slider("Window (± nm)", 1.0, 20.0, 6.0, 0.5, key="movie_win",
+                                   disabled=camera != "Follow the fringe")
+            trail_m = o[3].slider("Trail (previous frames)", 0, 20, 8, key="movie_trail",
+                                  help="Past peak/dip positions fade out behind the current ones.")
+            mark_m = o[3].checkbox("Mark the followed fringe", True, key="movie_mark")
+            big_m = o[3].checkbox(f"Big {cond_name.lower()} readout", True, key="movie_big", disabled=not has_cond)
+        follow_nm_m = follow_m if (camera == "Follow the fringe" and movie_track is not None) else None
 
-    rows_m = tuple(int(r) for r in frame_rows(len(data), every_m, MOVIE_MAX_FRAMES))
-    ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window)
-    all_m = {k: tracks[k] for k in tracked["fringe"]} if panel_m == "All fringes" else None
-    st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m,
-                                 mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,
-                                 panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond),
-                    width="stretch")
-    st.caption(f"{len(rows_m)} frames. Press ▶ Play, or drag the slider (time in minutes). "
-               "Peaks and dips are detected with the sidebar settings on every frame; grey markers are "
-               "their positions in the previous frames.")
-    with c[3]:
-        st.write("")
-        if st.button("Render as GIF for slides", help="Draws every frame with matplotlib using the options "
-                                                       "above (panel: one fringe); takes a minute."):
-            t0 = _time.time()
-            with st.spinner("Rendering the GIF…"):
-                gif = movie_gif(data, movie_track, data_key, movie_label, every_m, fps_m,
-                                prominence, distance, smooth_window, cond_name, cond_unit,
-                                delta=(mode_m == "Change from first spectrum"), follow_nm=follow_nm_m,
-                                trail=trail_m, mark_fringe=mark_m)
-            st.session_state["movie_gif"] = (gif, f"{Path(file_name).stem}_movie.gif")
-            st.caption(f"{len(gif) / 1e6:.1f} MB in {_time.time() - t0:.0f} s")
-        if "movie_gif" in st.session_state:
-            gif, name = st.session_state["movie_gif"]
-            st.download_button("Download GIF", gif, name, "image/gif")
+        rows_m = tuple(int(r) for r in frame_rows(len(data), every_m, MOVIE_MAX_FRAMES))
+        ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window)
+        all_m = {k: tracks[k] for k in tracked["fringe"]} if panel_m == "All fringes" else None
+        st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m,
+                                     mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,
+                                     panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond),
+                        width="stretch")
+        st.caption(f"{len(rows_m)} frames. Press ▶ Play, or drag the slider (time in minutes). "
+                   "Peaks and dips are detected with the sidebar settings on every frame; grey markers are "
+                   "their positions in the previous frames.")
+        with c[3]:
+            st.write("")
+            if st.button("Render as GIF for slides", help="Draws every frame with matplotlib using the options "
+                                                           "above (panel: one fringe); takes a minute."):
+                t0 = _time.time()
+                with st.spinner("Rendering the GIF…"):
+                    gif = movie_gif(data, movie_track, data_key, movie_label, every_m, fps_m,
+                                    prominence, distance, smooth_window, cond_name, cond_unit,
+                                    delta=(mode_m == "Change from first spectrum"), follow_nm=follow_nm_m,
+                                    trail=trail_m, mark_fringe=mark_m)
+                st.session_state["movie_gif"] = (gif, f"{Path(file_name).stem}_movie.gif")
+                st.caption(f"{len(gif) / 1e6:.1f} MB in {_time.time() - t0:.0f} s")
+            if "movie_gif" in st.session_state:
+                gif, name = st.session_state["movie_gif"]
+                st.download_button("Download GIF", gif, name, "image/gif")
 
 # ---- export ---------------------------------------------------------------
 with tab_export:

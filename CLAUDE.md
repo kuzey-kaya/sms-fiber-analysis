@@ -32,6 +32,7 @@ python3 scripts/hero_figures.py                    # fig15-17 annotated maps
 python3 scripts/spectral_3d.py                     # fig18-19 3-D views (+ HTML if plotly installed)
 python3 scripts/make_movie.py                      # movie_run.gif: the run animated (Igor movie export)
 python3 scripts/phase_analysis.py                  # fig21-22 + phase CSVs: SM1E.2 phase-unwrapping readout
+python3 scripts/make_movie.py --phase              # movie_phase.gif: the phase readout animated
 ```
 Interactive app (FringeLab, draft): `python3 launch.py`, or double-click `run_app.bat` (Windows) /
 `run_app.command` (macOS); development: `streamlit run app.py`.
@@ -141,7 +142,12 @@ It is a continuous cooldown — no setpoint steps.
   big blue condition readout in the spectrum panel.
 - `scripts/make_movie.py` — CLI for it → `figures/movie_run.gif` (`--format mp4`, `--every`, `--fps`,
   `--track`, `--no-track`, `--delta`, `--follow NM`, `--trail N`, `--no-mark`); default fringe = most
-  sensitive reliably tracked one.
+  sensitive reliably tracked one. `--phase [--lambda-a --lambda-b]` → `movie_phase.gif` via
+  `movie.render_phase_movie` (numbered extrema, cubic over the first frame's ghost, λc, readout
+  growing); at the end of the cooldown the λc extremum turns from dip to peak (24 → 25 extrema).
+- App Movie tab has a radio `movie_kind` at the top: "Spectra and fringes" (the original body,
+  indented under `else:`) or "Phase readout (SM1E.2)" (`phase_movie_figure`, frames update traces
+  1,2,4,5,6,7,8; pair read from the Phase tab's `phase_a`/`phase_b` session keys; `phase_movie_gif`).
 - `app.py` Movie tab — Plotly animation (`movie_figure`, ≤ 150 frames, ≤ 500 wavelength points per
   frame; trace order documented in its docstring, frames update traces 1–8; play/pause + time
   slider) with the same options under "Movie options" plus `panel` = One fringe / All fringes

@@ -77,7 +77,7 @@ expected file layout with a downloadable template CSV and a report of how the
 loaded file was interpreted.
 | Phase | the SM1E.2 phase-unwrapping readout: numbered extrema and the cubic Δφ(λ), the phase difference between two chosen wavelengths vs time and vs the condition, λc vs the condition, the best wavelength pairs for the run, and how much of the phase change is common to all wavelengths |
 | 3-D view | transmittance as height over wavelength × time/condition (rotatable) |
-| Movie | the run animated frame by frame (spectrum + extrema with fading trails, big temperature readout, map cursor, one fringe or all fringes in the lower-right panel) with play/pause, a time slider, Δ view and a camera that follows a fringe; GIF export for slides |
+| Movie | two movies, chosen at the top of the tab. *Spectra and fringes*: the run frame by frame (spectrum + extrema with fading trails, big temperature readout, map cursor, one fringe or all fringes in the lower-right panel) with Δ view and a camera that follows a fringe. *Phase readout (SM1E.2)*: numbered extrema, the cubic Δφ(λ) and λc moving, the readout growing (pair taken from the Phase tab). Both with play/pause, a time slider and GIF export for slides |
 | Export | tracked fringes (wide/long CSV), fringe table, the settings used |
 
 Sidebar settings: data source (the example run `data/data.csv` or an uploaded
@@ -175,6 +175,13 @@ Options: `--delta` (each spectrum minus the first: only what moved is left),
 `--follow NM` (the camera follows the tracked fringe with a ± NM window),
 `--trail N`, `--no-mark`, `--track`, `--every`, `--fps`.
 
+`--phase` animates the phase-unwrapping readout instead (`movie_phase.gif`): the
+spectrum with its extrema numbered λ±n around λc, the cubic Δφ(λ) over the first
+frame's cubic, λc, and the readout |φ(λb) − φ(λa)| growing with the temperature
+(`--lambda-a/--lambda-b`, default 1545/1570 nm). Near the end of the cooldown
+the extremum at λc turns from a dip into a peak — a new pair of extrema is
+born — and the readout carries on without a jump.
+
 The same animation runs in the app's *Movie* tab with play/pause and a time
 slider, the options above under *Movie options*, a lower-right panel that can
 show one fringe (Igor style) or every tracked fringe's shift with the current
@@ -215,6 +222,7 @@ python scripts/spectral_3d.py      # fig18-19: 3-D views (+ interactive HTML wit
 | `phase_series.csv` | per spectrum: λc, φ(λa), φ(λb), readout, cubic-fit RMS, extrema between λa and λb |
 | `phase_pair_scan.csv` | temperature sensitivity, R², scatter and resolution of the readout for every wavelength pair on a 5 nm grid |
 | `phase_vs_tracking.csv` | phase change implied by peak tracking, per fringe (common part + tilt) |
+| `movie_phase.gif` / `.mp4` | the phase-unwrapping readout animated (`scripts/make_movie.py --phase`) |
 | `movie_run.gif` / `.mp4` | the run animated: spectrum + extrema per frame, map with time cursor, tracked fringe growing (`scripts/make_movie.py`) |
 | `fig20_calibration_models.png` | linear vs quadratic calibration of the detailed fringe with both residual series (`run_analysis.py`) |
 | `tracked_all_long.csv` | every tracked fringe: fringe, time, T, wavelength, value (one row per fringe per frame) |

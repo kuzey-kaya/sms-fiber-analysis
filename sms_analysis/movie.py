@@ -204,3 +204,142 @@ def render_movie(
     anim.save(out, writer=writer, dpi=dpi)
     plt.close(fig)
     return out
+
+
+def render_phase_movie(
+    data: SpectraSet,
+    out: str | Path,
+    fits: list | None = None,
+    lambda_a: float = 1545.0,
+    lambda_b: float = 1570.0,
+    every: int = 5,
+    fps: int = 12,
+    prominence: float = 0.02,
+    distance: int = 5,
+    smooth_window: int = 11,
+    cond_name: str = "Temperature",
+    cond_unit: str = "°C",
+    dpi: int = 90,
+    progress=None,
+) -> Path:
+    """Animate the SM1E.2 phase-unwrapping readout (see :mod:`sms_analysis.phase`).
+
+    Each frame: the spectrum with its extrema numbered λ±n around λc and the
+    two readout wavelengths marked; the assigned phases Δφ(λ±n) = −(n−1)π with
+    the cubic Δφ(λ) and λc (the first frame's cubic stays as a grey ghost, so
+    the change of shape is visible); and the readout |φ(λb) − φ(λa)| with the
+    condition drawn up to the current time.  ``fits`` (from
+    :func:`sms_analysis.phase.phase_fits`) are computed when not given.
+    MP4 with ffmpeg on the PATH, otherwise GIF.
+    """
+    from .phase import phase_fits, phase_series
+
+    out = Path(out)
+    if fits is None:
+        fits = phase_fits(data, prominence=prominence, distance=distance, smooth_window=smooth_window)
+    series = phase_series(data, lambda_a, lambda_b, fits=fits)
+    rows = [int(r) for r in frame_rows(len(data), every) if fits[int(r)] is not None]
+    if not rows:
+        raise ValueError("No spectrum could be fitted with the phase model")
+    wl = data.wavelengths
+    xs = np.linspace(wl.min(), wl.max(), 300)
+    has_cond = data.has_temperature
+    fit0 = fits[rows[0]]
+
+    fig = plt.figure(figsize=(11, 6.4))
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.35, 1], wspace=0.3, hspace=0.45,
+                          top=0.90, bottom=0.09, left=0.07, right=0.93)
+    ax_s = fig.add_subplot(gs[:, 0])
+    ax_p = fig.add_subplot(gs[0, 1])
+    ax_r = fig.add_subplot(gs[1, 1])
+
+    # spectrum with numbered extrema
+    line, = ax_s.plot(wl, data.spectra[rows[0]], color=COLOR_WAVELENGTH, lw=1.3)
+    ext_pts = ax_s.scatter([], [], s=22, color=COLOR_TEMPERATURE, zorder=3)
+    for w in (lambda_a, lambda_b):
+        ax_s.axvline(w, color="#666666", ls=":", lw=1)
+        ax_s.text(w, 1.0, f"{w:g}", transform=ax_s.get_xaxis_transform(), ha="center", va="bottom",
+                  fontsize=8)
+    labels_txt = [ax_s.text(0, 0, "", fontsize=8, ha="center") for _ in range(7)]
+    lo, hi = np.nanmin(data.spectra), np.nanmax(data.spectra)
+    ax_s.set_xlim(wl.min(), wl.max())
+    ax_s.set_ylim(lo - 0.06 * (hi - lo), hi + 0.10 * (hi - lo))
+    ax_s.set_xlabel("Wavelength (nm)")
+    ax_s.set_ylabel("Transmittance")
+
+    # phase profile, first frame as a ghost
+    ax_p.plot(xs, fit0.phase(xs), color="#bbbbbb", lw=1.2, label="first frame")
+    curve, = ax_p.plot(xs, fit0.phase(xs), color=COLOR_TEMPERATURE, lw=1.6, label="cubic Δφ(λ)")
+    pts, = ax_p.plot([], [], "o", mfc="none", color=COLOR_WAVELENGTH, ms=4)
+    lc_line = ax_p.axvline(fit0.lambda_c, color="#999999", ls="--", lw=1)
+    allp = np.concatenate([fits[r].phase(xs) for r in rows])
+    ax_p.set_xlim(wl.min(), wl.max())
+    ax_p.set_ylim(allp.min() - 2, max(allp.max(), 0) + 3)
+    ax_p.set_xlabel("Wavelength (nm)")
+    ax_p.set_ylabel("Δφ (rad)")
+    ax_p.set_title("Phase from the numbered extrema", fontsize=10)
+    ax_p.legend(frameon=False, fontsize=8, loc="lower center")
+
+    # readout growing in time (Igor colours)
+    rd, = ax_r.plot([], [], color=IGOR_RED, lw=1.4)
+    ok = series.dropna(subset=["phase_diff"])
+    pad = 0.08 * (ok["phase_diff"].max() - ok["phase_diff"].min() + 1e-9)
+    ax_r.set_xlim(data.time.min(), data.time.max())
+    ax_r.set_ylim(ok["phase_diff"].min() - pad, ok["phase_diff"].max() + pad)
+    ax_r.set_xlabel("Time, seconds")
+    ax_r.set_ylabel(f"|φ({lambda_b:g})−φ({lambda_a:g})| (rad)", color=IGOR_RED, fontsize=9)
+    ax_r.tick_params(axis="y", colors=IGOR_RED)
+    ax_r.xaxis.set_major_locator(MaxNLocator(5))
+    ax_r.set_title("Phase-difference readout", fontsize=10)
+    cond_line = None
+    if has_cond:
+        ax_c = ax_r.twinx()
+        cond_line, = ax_c.plot([], [], color=IGOR_BLUE, lw=1.4)
+        ax_c.set_ylim(np.nanmin(data.temperature), np.nanmax(data.temperature))
+        ax_c.set_ylabel(f"{cond_name}, {cond_unit}", color=IGOR_BLUE, rotation=270, labelpad=14)
+        ax_c.tick_params(axis="y", colors=IGOR_BLUE)
+        ax_c.grid(False)
+    stamp = fig.text(0.5, 0.975, "", ha="center", va="top", fontsize=12, fontweight="bold")
+
+    def draw(k: int):
+        r = rows[k]
+        f = fits[r]
+        line.set_ydata(data.spectra[r])
+        y = np.interp(f.wavelengths, wl, data.spectra[r])
+        ext_pts.set_offsets(np.c_[f.wavelengths, y])
+        labs = f.labels()
+        near = [i for i, lab in enumerate(labs) if lab == "λc" or int(lab[2:]) <= 3]
+        for t, i in zip(labels_txt, near + [None] * (len(labels_txt) - len(near))):
+            if i is None:
+                t.set_text("")
+                continue
+            up = f.kinds[i] == "peak"
+            t.set_position((f.wavelengths[i], y[i] + (0.035 if up else -0.06) * (hi - lo)))
+            t.set_text(labs[i])
+        curve.set_ydata(f.phase(xs))
+        okp = np.isfinite(f.phases)
+        pts.set_data(f.wavelengths[okp], f.phases[okp])
+        lc_line.set_xdata([f.lambda_c, f.lambda_c])
+        seg = series.iloc[: r + 1]
+        rd.set_data(seg["time"], seg["phase_diff"])
+        if cond_line is not None:
+            cond_line.set_data(seg["time"], seg["temperature"])
+        text = (f"spectrum {r + 1}/{len(data)} · λc = {f.lambda_c:.2f} nm · "
+                f"readout {series['phase_diff'][r]:.2f} rad")
+        if has_cond:
+            text += f" · {cond_name} = {data.temperature[r]:.2f} {cond_unit}"
+        stamp.set_text(text)
+        if progress:
+            progress(k + 1, len(rows))
+        return line, ext_pts, curve, pts, lc_line, rd, stamp
+
+    anim = animation.FuncAnimation(fig, draw, frames=len(rows), interval=1000 / fps, blit=False)
+    if out.suffix.lower() == ".mp4" and animation.FFMpegWriter.isAvailable():
+        writer = animation.FFMpegWriter(fps=fps, bitrate=2400)
+    else:
+        if out.suffix.lower() != ".gif":
+            out = out.with_suffix(".gif")
+        writer = animation.PillowWriter(fps=fps)
+    anim.save(out, writer=writer, dpi=dpi)
+    plt.close(fig)
+    return out
