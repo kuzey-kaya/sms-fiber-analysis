@@ -75,6 +75,7 @@ Manual alternative: `pip install -r requirements.txt`, then `python launch.py`.
 The start page (and the *How the file was read* panel above the tabs) shows the
 expected file layout with a downloadable template CSV and a report of how the
 loaded file was interpreted.
+| Phase | the SM1E.2 phase-unwrapping readout: numbered extrema and the cubic Δφ(λ), the phase difference between two chosen wavelengths vs time and vs the condition, λc vs the condition, the best wavelength pairs for the run, and how much of the phase change is common to all wavelengths |
 | 3-D view | transmittance as height over wavelength × time/condition (rotatable) |
 | Movie | the run animated frame by frame (spectrum + extrema with fading trails, big temperature readout, map cursor, one fringe or all fringes in the lower-right panel) with play/pause, a time slider, Δ view and a camera that follows a fringe; GIF export for slides |
 | Export | tracked fringes (wide/long CSV), fringe table, the settings used |
@@ -132,6 +133,32 @@ Regenerates the Igor-style step-like views of the cooldown: temperature-bin
 plateaus (`fig9`), the legacy Colab tracker with its fringe-hop (`fig10`,
 `fig11`) and the strongest peak in a fixed band (`fig12`).
 
+### Phase-unwrapping readout (Salik et al., SM1E.2)
+
+```bash
+python scripts/phase_analysis.py                              # 1545/1570 nm, the pair used in the paper
+python scripts/phase_analysis.py --lambda-a 1485 --lambda-b 1565
+```
+
+The method of the group's 2025 paper: in each spectrum the extrema are numbered
+λ±1, λ±2, … outward from the critical wavelength; λ+n and λ−n share a phase and
+successive extrema are π apart, so Δφ(λ±n) = −(n−1)π. A cubic through these
+points gives Δφ(λ) everywhere (its maximum is λc), and the readout is the phase
+difference between two wavelengths. That difference does not depend on how the
+extrema are labelled, so it runs past one fringe spacing without hopping.
+
+On `data/data.csv` the cubic fits every one of the 730 spectra (RMS 0.044 rad
+on the first) and reproduces the labelling of the paper's Fig. 1 (λc = 1525.2 nm).
+The 1545/1570 nm readout changes by only 0.80 rad over the 21 °C run
+(−31.6 mrad/°C, R² 0.980); the best pair on a 5 nm grid, one wavelength on each
+side of λc (1485/1565 nm), gives 77 mrad/°C, R² 0.9975, ≈ 0.3 °C resolution;
+λc itself moves +31 pm/°C. The reason is physical, and peak tracking confirms
+it: every tracked fringe implies a phase gain of about +3.1 rad (≈ π, one new
+extremum appears at λc), common to all wavelengths, plus a tilt of ~2 rad across
+the band. A phase difference cancels the common part and sees only the tilt. The
+paper demonstrates strain, where the profile changes shape; for temperature it
+names wide-range measurement as future work.
+
 ### Movie of the run (Igor-style movie export)
 
 ```bash
@@ -183,6 +210,11 @@ python scripts/spectral_3d.py      # fig18-19: 3-D views (+ interactive HTML wit
 | `fig18_3d_spectral_surface.png` | 3-D: spectral map on the floor, each tracked fringe rising with temperature, cooling curve on the back wall (`scripts/spectral_3d.py`) |
 | `fig19_3d_fringe_landscape.png` | 3-D: transmittance as height over wavelength × temperature — ridges/valleys tilting across λc |
 | `fig18_3d_interactive.html` | rotatable version of fig18; written only if `plotly` is installed (`pip3 install plotly`) |
+| `fig21_phase_profile.png` | first spectrum with extrema numbered λ±n around λc, and their phases with the cubic Δφ(λ) fit — counterpart of Fig. 1 of SM1E.2 (`scripts/phase_analysis.py`) |
+| `fig22_phase_readout.png` | phase-difference readout vs time (Igor colours), vs temperature with a linear fit, and λc vs temperature — counterpart of Fig. 2 of SM1E.2 |
+| `phase_series.csv` | per spectrum: λc, φ(λa), φ(λb), readout, cubic-fit RMS, extrema between λa and λb |
+| `phase_pair_scan.csv` | temperature sensitivity, R², scatter and resolution of the readout for every wavelength pair on a 5 nm grid |
+| `phase_vs_tracking.csv` | phase change implied by peak tracking, per fringe (common part + tilt) |
 | `movie_run.gif` / `.mp4` | the run animated: spectrum + extrema per frame, map with time cursor, tracked fringe growing (`scripts/make_movie.py`) |
 | `fig20_calibration_models.png` | linear vs quadratic calibration of the detailed fringe with both residual series (`run_analysis.py`) |
 | `tracked_all_long.csv` | every tracked fringe: fringe, time, T, wavelength, value (one row per fringe per frame) |
@@ -208,6 +240,7 @@ sms_analysis/
   peaks.py      extrema detection + parabolic sub-sample refinement
   tracking.py   windowed fringe tracking with fringe-hop rejection
   analysis.py   linear and quadratic λ(T) fits, curvature test, per-fringe sensitivity table
+  phase.py      phase-unwrapping readout of SM1E.2 (cubic Δφ(λ), λc, phase difference, pair scan)
   plotting.py   all figures
 scripts/
   run_analysis.py   end-to-end pipeline (CLI)

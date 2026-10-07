@@ -31,6 +31,8 @@ from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_
                           track_all_extrema)
 from sms_analysis.io import SpectraSet
 from sms_analysis.movie import frame_rows, render_movie
+from sms_analysis.phase import (PAPER_LAMBDA_A, PAPER_LAMBDA_B, phase_fits, phase_sensitivity,
+                                phase_series, scan_pairs, tracked_phase_change)
 
 APP_NAME = "FringeLab"
 ROOT = Path(__file__).resolve().parent
@@ -250,6 +252,87 @@ def track_all(_data: SpectraSet, data_key: str, prominence: float, distance: int
     return track_all_extrema(_data, prominence=prominence, distance=distance,
                              search_window=search_window, smooth_window=smooth_window,
                              max_step=max_step)
+
+
+@st.cache_data(show_spinner="Fitting the phase profile of every spectrum…")
+def phase_fits_cached(_data: SpectraSet, data_key: str, prominence: float, distance: int,
+                      smooth_window: int):
+    return phase_fits(_data, prominence=prominence, distance=distance, smooth_window=smooth_window)
+
+
+def phase_profile_figure(data, fit):
+    """First spectrum with numbered extrema, and their phases with the cubic fit."""
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("Extrema numbered outward from λc",
+                                                        "Δφ(λ±n) = −(n−1)π and the cubic fit"))
+    fig.add_trace(go.Scatter(x=data.wavelengths, y=data.spectra[0], mode="lines", name="first spectrum",
+                             line=dict(color=PEAK_COLOR, width=1.4), hoverinfo="skip"), row=1, col=1)
+    y0 = np.interp(fit.wavelengths, data.wavelengths, data.spectra[0])
+    labels = fit.labels()
+    near = [lab if (lab == "λc" or int(lab[2:]) <= 3) else "" for lab in labels]   # avoid crowding
+    fig.add_trace(go.Scatter(
+        x=fit.wavelengths, y=y0, mode="markers+text", name="extrema", text=near, customdata=labels,
+        textposition=["top center" if k == "peak" else "bottom center" for k in fit.kinds],
+        textfont=dict(size=10),
+        marker=dict(symbol=["circle" if k == "peak" else "triangle-down" for k in fit.kinds], size=8,
+                    color=DIP_COLOR, line=dict(color="black", width=0.5)),
+        hovertemplate="%{customdata}: %{x:.2f} nm<extra></extra>"), row=1, col=1)
+    ok = np.isfinite(fit.phases)
+    xs = np.linspace(data.wavelengths.min(), data.wavelengths.max(), 300)
+    fig.add_trace(go.Scatter(x=fit.wavelengths[ok], y=fit.phases[ok], mode="markers", name="assigned phase",
+                             marker=dict(symbol="circle-open", size=8, color=PEAK_COLOR),
+                             text=[l for l, k in zip(labels, ok) if k],
+                             hovertemplate="%{text}: %{y:.2f} rad<extra></extra>"), row=1, col=2)
+    fig.add_trace(go.Scatter(x=xs, y=fit.phase(xs), mode="lines", name=f"cubic, RMS {fit.rms:.3f} rad",
+                             line=dict(color=QUAD_COLOR, width=2), hoverinfo="skip"), row=1, col=2)
+    fig.add_vline(x=fit.lambda_c, line_dash="dash", line_color="#999999", row=1, col=2)
+    fig.update_xaxes(title_text="Wavelength (nm)")
+    fig.update_yaxes(title_text="Transmittance", row=1, col=1)
+    fig.update_yaxes(title_text="Δφ (rad)", row=1, col=2)
+    fig.update_layout(height=450, margin=dict(l=10, r=10, t=60, b=10),
+                      legend=dict(orientation="h", y=-0.2, x=0))
+    return fig
+
+
+def phase_readout_figure(series, sens, la, lb, has_cond, cond_title):
+    """Readout vs time (Igor colours), vs the condition with its fit, and λc vs the condition."""
+    # time on its own full-width row (it has two y-axes), the two condition plots below it
+    if has_cond:
+        fig = make_subplots(rows=2, cols=2, specs=[[{"colspan": 2, "secondary_y": True}, None], [{}, {}]],
+                            subplot_titles=("Readout and condition vs time", "Readout vs condition",
+                                            "λc vs condition"),
+                            vertical_spacing=0.2, horizontal_spacing=0.12)
+    else:
+        fig = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]],
+                            subplot_titles=("Readout vs time",))
+    fig.add_trace(go.Scatter(x=series["time"], y=series["phase_diff"], mode="lines", name="readout",
+                             line=dict(color=RED, width=1.4)), row=1, col=1, secondary_y=False)
+    fig.update_yaxes(title_text=f"|φ({lb:g}) − φ({la:g})| (rad)", color=RED, row=1, col=1, secondary_y=False)
+    fig.update_xaxes(title_text="Time (s)", row=1, col=1)
+    if has_cond:
+        fig.add_trace(go.Scatter(x=series["time"], y=series["temperature"], mode="lines", name=cond_title,
+                                 line=dict(color=BLUE, width=1.4)), row=1, col=1, secondary_y=True)
+        fig.update_yaxes(title_text=cond_title, color=BLUE, showgrid=False, row=1, col=1, secondary_y=True)
+        ok = series.dropna(subset=["phase_diff", "temperature"])
+        t = np.linspace(ok["temperature"].min(), ok["temperature"].max(), 50)
+        fig.add_trace(go.Scatter(x=ok["temperature"], y=ok["phase_diff"], mode="markers", name="frames",
+                                 marker=dict(size=4, color=PEAK_COLOR, opacity=0.5)), row=2, col=1)
+        if sens is not None:
+            fig.add_trace(go.Scatter(x=t, y=sens.slope * t + sens.intercept, mode="lines",
+                                     name=f"{sens.slope * 1e3:+.1f} mrad per unit, R² {sens.r_squared:.4f}",
+                                     line=dict(color="#333333", width=2)), row=2, col=1)
+        okc = ok.dropna(subset=["lambda_c"])
+        k = np.polyfit(okc["temperature"], okc["lambda_c"], 1)
+        fig.add_trace(go.Scatter(x=okc["temperature"], y=okc["lambda_c"], mode="markers", name="λc",
+                                 marker=dict(size=4, color=DIP_COLOR, opacity=0.5)), row=2, col=2)
+        fig.add_trace(go.Scatter(x=t, y=np.polyval(k, t), mode="lines", name=f"λc {k[0] * 1e3:+.1f} pm per unit",
+                                 line=dict(color="#333333", width=2, dash="dot")), row=2, col=2)
+        fig.update_xaxes(title_text=cond_title, row=2, col=1)
+        fig.update_xaxes(title_text=cond_title, row=2, col=2)
+        fig.update_yaxes(title_text="Readout (rad)", row=2, col=1)
+        fig.update_yaxes(title_text="λc (nm)", row=2, col=2)
+    fig.update_layout(height=760 if has_cond else 420, margin=dict(l=10, r=10, t=40, b=10),
+                      legend=dict(orientation="h", y=-0.12, x=0))
+    return fig
 
 
 def fringe_table(tracks: dict[str, pd.DataFrame], has_cond: bool) -> pd.DataFrame:
@@ -839,10 +922,11 @@ if not has_cond:
 y_modes = ["Time", "Spectrum number"] + (["Condition"] if has_cond else [])
 y_label = {"Time": "Time", "Spectrum number": "Spectrum number", "Condition": cond_name}.get
 
-tab_map, tab_spec, tab_track, tab_sens, tab_3d, tab_movie, tab_export = st.tabs(
+tab_map, tab_spec, tab_track, tab_sens, tab_phase, tab_3d, tab_movie, tab_export = st.tabs(
     [":material/gradient: Spectral map", ":material/show_chart: Spectrum & peaks",
      ":material/timeline: Fringe tracking", ":material/thermostat: Sensitivity",
-     ":material/view_in_ar: 3-D view", ":material/movie: Movie", ":material/download: Export"])
+     ":material/waves: Phase", ":material/view_in_ar: 3-D view", ":material/movie: Movie",
+     ":material/download: Export"])
 
 # ---- spectral map ---------------------------------------------------------
 with tab_map:
@@ -980,6 +1064,78 @@ with tab_sens:
                        "RMSE quadratic (pm)": st.column_config.NumberColumn(format="%.0f"),
                        f"S at min {cond_unit} (pm)": st.column_config.NumberColumn(format="%+.0f"),
                        f"S at max {cond_unit} (pm)": st.column_config.NumberColumn(format="%+.0f")})
+
+# ---- phase unwrapping (SM1E.2) ---------------------------------------------
+with tab_phase:
+    st.markdown("**Phase-unwrapping readout** (Salik et al., Optica Sensing Congress 2025, SM1E.2). "
+                "The extrema on either side of the critical wavelength are numbered λ±1, λ±2, …; "
+                "λ+n and λ−n share a phase and successive extrema are π apart, so "
+                "Δφ(λ±n) = −(n−1)π. A cubic through these points gives Δφ(λ) for every wavelength, and "
+                "its maximum is λc. The readout is the phase difference between two wavelengths, which "
+                "does not depend on how the extrema are labelled — that is what lets it run past one "
+                "fringe spacing without hopping.")
+    fits_p = phase_fits_cached(data, data_key, prominence, distance, smooth_window)
+    fit0_p = next((f for f in fits_p if f is not None), None)
+    if fit0_p is None:
+        st.info("No spectrum has at least two extrema on each side of a critical wavelength inside the "
+                "selected band, so the phase profile cannot be built. Widen the wavelength range or lower "
+                "the prominence.")
+    else:
+        wl_min, wl_max = float(data.wavelengths.min()), float(data.wavelengths.max())
+        c = st.columns([1.2, 1.2, 2])
+        la = c[0].number_input("Wavelength a (nm)", wl_min, wl_max,
+                               float(np.clip(PAPER_LAMBDA_A, wl_min, wl_max)), 0.5, key="phase_a")
+        lb = c[1].number_input("Wavelength b (nm)", wl_min, wl_max,
+                               float(np.clip(PAPER_LAMBDA_B, wl_min, wl_max)), 0.5, key="phase_b")
+        c[2].caption("Defaults are the pair used in the paper (1545 and 1570 nm). The pair scan below "
+                     "shows which pair responds most to this run's condition.")
+        ser = phase_series(data, la, lb, fits=fits_p)
+        n_fit = int(ser["phase_diff"].notna().sum())
+        sens_p = None
+        if has_cond and n_fit >= 3:
+            try:
+                sens_p = phase_sensitivity(ser)
+            except ValueError:
+                sens_p = None
+        lam = ser["lambda_c"].dropna()
+        tiles = [("λc (first → last)", f"{lam.iloc[0]:.1f} → {lam.iloc[-1]:.1f} nm" if len(lam) else "—",
+                  f"cubic fit RMS {ser['rms'].median():.3f} rad (median)"),
+                 ("Spectra fitted", f"{n_fit} / {len(ser)}", f"{len(fit0_p.wavelengths)} extrema in the first")]
+        if sens_p is not None:
+            tiles += [(f"Readout per {cond_unit}", f"{sens_p.slope * 1e3:+.1f} mrad",
+                       f"± {sens_p.stderr * 1e3:.1f} · R² {sens_p.r_squared:.4f}"),
+                      ("Span over the run", f"{sens_p.span_rad:.2f} rad", f"= {sens_p.span_fringes:.2f} fringe")]
+        stat_strip(tiles)
+        st.plotly_chart(phase_profile_figure(data, fit0_p), width="stretch")
+        st.plotly_chart(phase_readout_figure(ser, sens_p, la, lb, has_cond, cond_title), width="stretch")
+        if has_cond:
+            with st.expander("Which wavelength pair works best for this run? · what the readout sees"):
+                grid = np.arange(np.ceil(wl_min / 5) * 5 + 5, wl_max - 4, 5.0)
+                scan = scan_pairs(fits_p, data.temperature, grid)
+                if len(scan):
+                    st.dataframe(scan.sort_values("resolution").head(10).rename(columns={
+                        "lambda_a": "a (nm)", "lambda_b": "b (nm)", "slope": f"rad/{cond_unit}",
+                        "r_squared": "R²", "resid_rad": "scatter (rad)", "resolution": f"resolution ({cond_unit})",
+                        "span_rad": "span (rad)"}), hide_index=True, width="stretch",
+                        column_config={f"rad/{cond_unit}": st.column_config.NumberColumn(format="%+.4f"),
+                                       "R²": st.column_config.NumberColumn(format="%.4f"),
+                                       "scatter (rad)": st.column_config.NumberColumn(format="%.3f"),
+                                       f"resolution ({cond_unit})": st.column_config.NumberColumn(format="%.2f"),
+                                       "span (rad)": st.column_config.NumberColumn(format="%.2f")})
+                    st.caption("Resolution = scatter about the line ÷ slope; curvature counts as scatter, so it "
+                               "is an upper bound.")
+                common = tracked_phase_change(fit0_p, {k: tracks[k] for k in tracked["fringe"]})
+                if len(common):
+                    st.markdown(
+                        f"Peak tracking implies that every fringe's phase changed by "
+                        f"**{common.phase_change_rad.mean():+.2f} rad** on average over the run "
+                        f"({common.phase_change_rad.mean() / np.pi:+.2f}π), with a spread of "
+                        f"{common.phase_change_rad.min():.2f}…{common.phase_change_rad.max():.2f} rad across the band. "
+                        "The average is common to all wavelengths and cancels in a phase difference; only the "
+                        "spread reaches this readout. A strain run, where the phase profile changes shape, is "
+                        "where the paper demonstrates the method.")
+        st.download_button("Phase readout per spectrum (CSV)", ser.to_csv(index=False),
+                           f"{Path(file_name).stem}_phase_series.csv", "text/csv")
 
 # ---- 3-D ------------------------------------------------------------------
 with tab_3d:

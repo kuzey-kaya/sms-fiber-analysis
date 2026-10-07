@@ -8,6 +8,7 @@ from .io import SpectraSet, load_sms_csv
 from .peaks import detect_extrema, parabolic_refine
 from .tracking import track_feature, track_all_extrema
 from .analysis import curvature_test, fit_calibration, fit_sensitivity, sensitivity_map
+from .phase import fit_phase, phase_fits, phase_sensitivity, phase_series
 
 __all__ = [
     "SpectraSet",
@@ -20,4 +21,8 @@ __all__ = [
     "fit_calibration",
     "curvature_test",
     "sensitivity_map",
+    "fit_phase",
+    "phase_fits",
+    "phase_series",
+    "phase_sensitivity",
 ]

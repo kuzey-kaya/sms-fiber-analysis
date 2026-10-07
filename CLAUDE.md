@@ -31,6 +31,7 @@ python3 scripts/staircase_views.py                 # fig9-12 staircase / fringe-
 python3 scripts/hero_figures.py                    # fig15-17 annotated maps
 python3 scripts/spectral_3d.py                     # fig18-19 3-D views (+ HTML if plotly installed)
 python3 scripts/make_movie.py                      # movie_run.gif: the run animated (Igor movie export)
+python3 scripts/phase_analysis.py                  # fig21-22 + phase CSVs: SM1E.2 phase-unwrapping readout
 ```
 Interactive app (FringeLab, draft): `python3 launch.py`, or double-click `run_app.bat` (Windows) /
 `run_app.command` (macOS); development: `streamlit run app.py`.
@@ -72,6 +73,16 @@ It is a continuous cooldown — no setpoint steps.
   `sensitivity_at_ends_pm`, nested F-test p-value — overconfident because consecutive spectra are
   correlated, use it only to rank), `sensitivity_map` (table incl. the curved columns; returns
   empty frame when no temperature). Added 2026-10-06.
+- `sms_analysis/phase.py` — the phase-unwrapping readout of Salik et al. SM1E.2 (2025; paper PDF at
+  `~/Downloads/salik-optica-sensing-sensors-2025-sm1e.2-as-published.pdf`, advisor = first author).
+  `fit_phase` (extrema numbered λ±n outward from λc, Δφ(λ±n) = −(n−1)π, cubic fit, λc = vertex;
+  λc chosen by trying the 5 extrema nearest the previous frame's λc and keeping the best-fitting
+  labelling — our choice, not in the paper), `phase_fits`, `phase_series` (readout |φ(λb) − φ(λa)|,
+  default 1545/1570 nm as in the paper), `phase_sensitivity`, `scan_pairs`, `tracked_phase_change`.
+  Added 2026-10-07.
+- `scripts/phase_analysis.py` — fig21 (paper Fig. 1 counterpart), fig22 (paper Fig. 2 counterpart +
+  λc vs T), `phase_series.csv`, `phase_pair_scan.csv`, `phase_vs_tracking.csv`; `--lambda-a/-b`.
+  App: "Phase" tab (same content, pair inputs, best-pair table, common-mode explanation).
 - `sms_analysis/plotting.py`, `igor_style.py` (Igor Pro look: red λ left axis, blue T right axis),
   `staircase.py` (temperature-bin plateau averages).
 - `scripts/run_analysis.py` — main pipeline; writes `tracked_all_long.csv` (fringe, time, temperature,
@@ -170,6 +181,14 @@ Most sensitive trackable fringe: dip starting at 1542.3 nm, +359.3 ± 0.7 pm/°C
 Its quadratic calibration: RMSE 107 → 49 pm, local sensitivity +414 pm/°C at 22.8 °C and
 +283 pm/°C at 44.1 °C, curvature −6.1 pm/°C². 6 of the 22 good fringes have quadratic RMSE
 < 80 % of linear (those nearest λc); far fringes (e.g. dip@1567.7) are linear within noise.
+Phase unwrapping (SM1E.2) on this run: cubic fits 730/730 spectra (RMS 0.044 rad on the first;
+labelling identical to the paper's Fig. 1: λ−1 peak 1515.7, λc dip 1526.2, λ+1 peak 1534.6), λc =
+1525.2 → 1524.6 nm, +31.0 pm/°C. Readout |φ(1570) − φ(1545)|: −31.6 ± 0.2 mrad/°C, R² 0.980, span
+only 0.80 rad over 21 °C; best 5 nm-grid pair 1485/1565 nm: 77 mrad/°C, R² 0.9975, ≈ 0.28 °C.
+Why small: peak tracking implies a phase gain of +3.11 rad (≈ π; extrema 24 → 25, one born at λc)
+common to all fringes, spread 2.14…4.02 rad across the band; a phase difference sees only the
+spread. Temperature here is mostly a common phase shift; the paper shows strain (shape change) and
+leaves temperature as future work — a finding to discuss with the advisor, not a bug.
 
 ## Decisions and their reasons
 
@@ -219,7 +238,8 @@ SM1E.2 (phase unwrapping, wide dynamic range); Chen 2025 Optica Sensing JM4A.8 (
   first-run install have not been tried on a real second machine yet; no app icon/name decided
   ("FringeLab" is a placeholder, one constant `APP_NAME`); candidates to add: staircase/legacy
   views, choice of reference spectrum, side-by-side comparison of two files, packaged installer.
-- Port the phase-unwrapping method (SM1E.2) onto `SpectraSet`/tracks.
+- Phase unwrapping (SM1E.2) is ported (2026-10-07). Next: run it on the strain CSV (the paper's own
+  case) to check it reproduces ~974 µrad/µε; ask the advisor whether their code picks λc the same way.
 - Run on new datasets: copy the file to `data/data.csv` (or pass its path), run
   `inspect_csv.py`, then the four scripts.
 - Keep README's figure table and this file in sync when adding outputs.
