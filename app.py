@@ -748,10 +748,9 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
                                    dict(label="❚❚ Pause", method="animate",
                                         args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])],
         sliders=[dict(active=0, x=0.0, y=-0.14, len=1.0, pad=dict(t=0), ticklen=4,
-                      currentvalue=dict(visible=True, prefix="t = ", suffix=" min", xanchor="left",
-                                        font=dict(size=12), offset=2),
+                      currentvalue=dict(visible=False),
                       steps=[dict(method="animate", label=(f"{t_min[r]:.0f}" if k % label_every == 0 else ""),
-                                  value=f"{t_min[r]:.1f}",
+                                  value=str(k),
                                   args=[[str(k)], dict(frame=dict(duration=0, redraw=True), mode="immediate")])
                              for k, r in enumerate(rows)])],
     )
@@ -796,7 +795,7 @@ def phase_movie_figure(data, rows, fits, la, lb, fps, cond_name, cond_unit):
     fit0 = fits[rows[0]]
 
     fig = make_subplots(rows=2, cols=2, specs=[[{"rowspan": 2}, {}], [None, {"secondary_y": True}]],
-                        column_widths=[0.56, 0.44], vertical_spacing=0.18, horizontal_spacing=0.1,
+                        column_widths=[0.54, 0.46], vertical_spacing=0.18, horizontal_spacing=0.15,
                         subplot_titles=("", "Phase from the numbered extrema", "Phase-difference readout"))
 
     def frame_traces(k):
@@ -845,7 +844,7 @@ def phase_movie_figure(data, rows, fits, la, lb, fps, cond_name, cond_unit):
     animated = [1, 2, 4, 5, 6, 7, 8]
 
     def stamp(r):
-        text = f"spectrum {r + 1}/{len(data)} · λc = {fits[r].lambda_c:.2f} nm · readout {series['phase_diff'][r]:.2f} rad"
+        text = f"spectrum {r + 1}/{len(data)} · t = {data.time[r] / 60:.0f} min · λc = {fits[r].lambda_c:.2f} nm<br>readout {series['phase_diff'][r]:.2f} rad"
         if has_cond:
             text += f" · {cond_name} = {data.temperature[r]:.2f} {cond_unit}"
         return text
@@ -866,10 +865,9 @@ def phase_movie_figure(data, rows, fits, la, lb, fps, cond_name, cond_unit):
                                    dict(label="❚❚ Pause", method="animate",
                                         args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])],
         sliders=[dict(active=0, x=0.0, y=-0.14, len=1.0, pad=dict(t=0), ticklen=4,
-                      currentvalue=dict(visible=True, prefix="t = ", suffix=" min", xanchor="left",
-                                        font=dict(size=12), offset=2),
+                      currentvalue=dict(visible=False),
                       steps=[dict(method="animate", label=(f"{t_min[r]:.0f}" if k % label_every == 0 else ""),
-                                  value=f"{t_min[r]:.1f}",
+                                  value=str(k),
                                   args=[[str(k)], dict(frame=dict(duration=0, redraw=True), mode="immediate")])
                              for k, r in enumerate(rows)])],
     )
