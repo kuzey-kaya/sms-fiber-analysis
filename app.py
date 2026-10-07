@@ -595,10 +595,10 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
     if delta:
         d_all = data.spectra[::max(1, len(data) // 100)] - s0
         lim = float(np.nanpercentile(np.abs(d_all), 99.5)) or 0.1
-        y_range = (-1.08 * lim, 1.08 * lim)
+        y_range = (-1.08 * lim, 1.30 * lim)
     else:
         lo, hi = np.nanmin(data.spectra), np.nanmax(data.spectra)
-        y_range = (lo - 0.04 * (hi - lo), hi + 0.08 * (hi - lo))
+        y_range = (lo - 0.04 * (hi - lo), hi + 0.18 * (hi - lo))
     if shifts:
         allv = np.concatenate([v[np.isfinite(v)] for v in shifts.values()] or [np.array([0.0])])
         shift_lo, shift_hi = float(allv.min()) - 0.3, float(allv.max()) + 0.3
@@ -641,10 +641,10 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
         lay = dict(title_text=stamp(r))
         if big_readout and has_cond:
             lay["annotations"] = base_annotations + [dict(
-                xref="x domain", yref="y domain", x=0.02, y=0.97, xanchor="left", yanchor="top",
-                text=f"<b>{data.temperature[r]:.2f} {cond_unit}</b><br><span style='font-size:11px'>"
-                     f"{cond_name} · {t_min[r]:.1f} min</span>",
-                showarrow=False, font=dict(size=24, color=BLUE), align="left")]
+                xref="x domain", yref="y domain", x=0.99, y=0.99, xanchor="right", yanchor="top",
+                text=f"<b>{data.temperature[r]:.2f} {cond_unit}</b>  <span style='font-size:11px'>"
+                     f"{t_min[r]:.1f} min</span>",
+                showarrow=False, font=dict(size=22, color=BLUE), align="right")]
         if follow_nm and np.isfinite(trk_wl[r]):
             lay["xaxis"] = dict(range=[trk_wl[r] - follow_nm, trk_wl[r] + follow_nm], title_text="Wavelength (nm)")
         return go.Layout(**lay)
@@ -653,19 +653,22 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
               for k in range(len(rows))]
     fig.frames = frames
     step = dict(duration=int(1000 / fps), redraw=True)
+    label_every = max(1, len(rows) // 12)
     fig.update_layout(
-        height=640, margin=dict(l=10, r=10, t=100, b=10),
+        height=660, margin=dict(l=10, r=10, t=100, b=20),
         title=dict(text=stamp(rows[0]), x=0, xanchor="left", y=0.985, yanchor="top"),
-        legend=dict(orientation="h", y=-0.08, x=0),
+        legend=dict(orientation="h", y=1.0, yanchor="bottom", x=1, xanchor="right", font=dict(size=11)),
         updatemenus=[dict(type="buttons", showactive=False, x=0, y=1.0, xanchor="left", yanchor="bottom",
                           direction="right", pad=dict(b=4),
                           buttons=[dict(label="▶ Play", method="animate",
                                         args=[None, dict(frame=step, fromcurrent=True, transition=dict(duration=0))]),
                                    dict(label="❚❚ Pause", method="animate",
                                         args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])],
-        sliders=[dict(active=0, x=0.0, y=-0.2, len=1.0, pad=dict(t=0),
-                      currentvalue=dict(visible=False),
-                      steps=[dict(method="animate", label=f"{t_min[r]:.0f}",
+        sliders=[dict(active=0, x=0.0, y=-0.14, len=1.0, pad=dict(t=0), ticklen=4,
+                      currentvalue=dict(visible=True, prefix="t = ", suffix=" min", xanchor="left",
+                                        font=dict(size=12), offset=2),
+                      steps=[dict(method="animate", label=(f"{t_min[r]:.0f}" if k % label_every == 0 else ""),
+                                  value=f"{t_min[r]:.1f}",
                                   args=[[str(k)], dict(frame=dict(duration=0, redraw=True), mode="immediate")])
                              for k, r in enumerate(rows)])],
     )
