@@ -72,21 +72,42 @@ def _to_float(x) -> float:
         return np.nan
 
 
+def _layout_score(df: pd.DataFrame) -> int:
+    """How many wavelengths a parse exposes: wavelength headers, or a wavelength first column."""
+    hdr = np.array([_to_float(h) for h in df.columns])
+    n_hdr = int((np.isfinite(hdr) & (hdr >= WL_MIN) & (hdr <= WL_MAX)).sum())
+    first = pd.to_numeric(df.iloc[:, 0].astype(str).str.replace(",", ".", regex=False),
+                          errors="coerce").to_numpy(float) if df.shape[1] else np.array([])
+    n_col = int(np.isfinite(first).sum()) if _looks_like_wavelength_axis(first) else 0
+    return max(n_hdr, n_col)
+
+
 def _read_table(path: Path) -> pd.DataFrame:
-    """Read with separator sniffing; fall back to decimal-comma files."""
+    """Read with separator sniffing, then keep whichever parse exposes the most wavelengths.
+
+    Sniffing alone misreads a ';'-separated file whose headers carry decimal
+    commas ("1500,1"): the commas look like separators.  So the sniffed parse
+    competes with explicit ';' / tab / ',' parses (with '.' or ',' decimals)
+    and the one that yields the most wavelength columns wins; ties keep the
+    sniffed parse.
+    """
     try:
-        df = pd.read_csv(path, sep=None, engine="python")
+        best = pd.read_csv(path, sep=None, engine="python")
     except Exception:  # noqa: BLE001 - sniffing can fail on odd files
-        df = pd.read_csv(path)
-    if df.shape[1] < 3:  # sniffing failed (e.g. ';' with decimal ',')
-        for sep in (";", "\t", ","):
+        best = pd.read_csv(path)
+    best_score = _layout_score(best)
+    for sep in (";", "\t", ","):
+        for dec in (",", "."):
+            if sep == dec:
+                continue
             try:
-                cand = pd.read_csv(path, sep=sep, decimal=",")
+                cand = pd.read_csv(path, sep=sep, decimal=dec)
             except Exception:  # noqa: BLE001
                 continue
-            if cand.shape[1] > df.shape[1]:
-                df = cand
-    return df
+            score = _layout_score(cand)
+            if score > best_score:
+                best, best_score = cand, score
+    return best
 
 
 def _numeric_frame(df: pd.DataFrame) -> pd.DataFrame:

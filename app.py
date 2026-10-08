@@ -780,10 +780,13 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
 def phase_movie_figure(data, rows, fits, la, lb, fps, cond_name, cond_unit):
     """Plotly animation of the SM1E.2 readout.
 
-    Traces (frames update 1, 2, 4, 5, 6, 7): 0 spectrum ghost (static) · 1 spectrum ·
-    2 numbered extrema · 3 first-frame cubic (static) · 4 assigned phases · 5 cubic ·
-    6 λc line · 7 readout · 8 condition.
+    Traces (frames update 1, 2, 3, 5, 6, 7, 8, 9): 0 spectrum ghost (static) · 1 spectrum ·
+    2 extrema markers · 3 λ±n labels · 4 first-frame cubic (static) · 5 assigned phases ·
+    6 cubic · 7 λc line · 8 readout · 9 condition.  The labels are a separate text trace
+    with a fixed number of slots: Plotly does not reliably animate a text array whose
+    length changes between frames (the extrema count goes 24 → 25 in the example run).
     """
+    n_slots = 7                                    # λc and λ±1…λ±3
     wl = data.wavelengths
     sc = max(1, int(np.ceil(len(wl) / MOVIE_MAX_COLS)))
     xs = np.linspace(wl.min(), wl.max(), 200)
@@ -803,18 +806,22 @@ def phase_movie_figure(data, rows, fits, la, lb, fps, cond_name, cond_unit):
         f = fits[r]
         y = np.interp(f.wavelengths, wl, data.spectra[r])
         labs = f.labels()
-        near = [lab if (lab == "λc" or int(lab[2:]) <= 3) else "" for lab in labs]
+        idx = [i for i, lab in enumerate(labs) if lab == "λc" or int(lab[2:]) <= 3][:n_slots]
+        off = 0.045 * (hi - lo)
+        lx = [float(f.wavelengths[i]) for i in idx] + [None] * (n_slots - len(idx))
+        ly = [float(y[i] + (off if f.kinds[i] == "peak" else -off)) for i in idx] + [None] * (n_slots - len(idx))
+        lt = [labs[i] for i in idx] + [""] * (n_slots - len(idx))
         okp = np.isfinite(f.phases)
         seg = series.iloc[: r + 1]
         return [
             go.Scatter(x=wl[::sc], y=data.spectra[r][::sc], mode="lines", name="spectrum",
                        line=dict(color=PEAK_COLOR, width=1.5), hoverinfo="skip"),
-            go.Scatter(x=f.wavelengths, y=y, mode="markers+text", name="extrema", text=near, customdata=labs,
-                       textposition=["top center" if k == "peak" else "bottom center" for k in f.kinds],
-                       textfont=dict(size=10),
+            go.Scatter(x=f.wavelengths, y=y, mode="markers", name="extrema", customdata=labs,
                        marker=dict(symbol=["circle" if k == "peak" else "triangle-down" for k in f.kinds],
                                    size=8, color=DIP_COLOR, line=dict(color="black", width=0.5)),
                        hovertemplate="%{customdata}: %{x:.2f} nm<extra></extra>"),
+            go.Scatter(x=lx, y=ly, mode="text", text=lt, textposition="middle center", showlegend=False,
+                       textfont=dict(size=11), hoverinfo="skip", cliponaxis=False),
             go.Scatter(x=f.wavelengths[okp], y=f.phases[okp], mode="markers", name="Δφ(λ±n) = −(n−1)π",
                        marker=dict(symbol="circle-open", size=7, color=PEAK_COLOR), hoverinfo="skip"),
             go.Scatter(x=xs, y=f.phase(xs), mode="lines", name="cubic Δφ(λ)",
@@ -832,16 +839,17 @@ def phase_movie_figure(data, rows, fits, la, lb, fps, cond_name, cond_unit):
                              line=dict(color="#aaaaaa", width=1), opacity=0.5, hoverinfo="skip"), row=1, col=1)
     fig.add_trace(base[0], row=1, col=1)
     fig.add_trace(base[1], row=1, col=1)
+    fig.add_trace(base[2], row=1, col=1)
     fig.add_trace(go.Scatter(x=xs, y=fit0.phase(xs), mode="lines", name="first-frame cubic",
                              line=dict(color="#bbbbbb", width=1.2), hoverinfo="skip"), row=1, col=2)
-    fig.add_trace(base[2], row=1, col=2)
     fig.add_trace(base[3], row=1, col=2)
     fig.add_trace(base[4], row=1, col=2)
-    fig.add_trace(base[5], row=2, col=2, secondary_y=False)
-    fig.add_trace(base[6], row=2, col=2, secondary_y=True)
+    fig.add_trace(base[5], row=1, col=2)
+    fig.add_trace(base[6], row=2, col=2, secondary_y=False)
+    fig.add_trace(base[7], row=2, col=2, secondary_y=True)
     for w in (la, lb):
         fig.add_vline(x=w, line_dash="dot", line_color="#777777", row=1, col=1)
-    animated = [1, 2, 4, 5, 6, 7, 8]
+    animated = [1, 2, 3, 5, 6, 7, 8, 9]
 
     def stamp(r):
         text = f"spectrum {r + 1}/{len(data)} · t = {data.time[r] / 60:.0f} min · λc = {fits[r].lambda_c:.2f} nm<br>readout {series['phase_diff'][r]:.2f} rad"

@@ -159,6 +159,19 @@ the band. A phase difference cancels the common part and sees only the tilt. The
 paper demonstrates strain, where the profile changes shape; for temperature it
 names wide-range measurement as future work.
 
+**Is the implementation right?** Three checks, all in `tests/test_phase.py`:
+
+- The labelling of the first spectrum matches the paper's Fig. 1 extremum by extremum.
+- The result does not depend on how λc is picked: a fixed 1525 nm guess, one
+  candidate, or every extremum as a candidate give the identical readout.
+- `python scripts/validate_phase.py` → `fig23_phase_validation.png`: **SIMULATED**
+  runs built on the real phase profile with known changes. A common phase shift
+  of 3π–10π is ignored and an imposed change of φ(λb) − φ(λa) of 7 rad (several
+  fringe spacings, like the paper's strain run) is recovered to within 0.12 rad,
+  with no failed fit and no jump, while the peak tracker loses most fringes on
+  the same runs. The strain CSV itself — the paper's own case — has not been
+  available yet.
+
 ### Movie of the run (Igor-style movie export)
 
 ```bash
@@ -222,6 +235,7 @@ python scripts/spectral_3d.py      # fig18-19: 3-D views (+ interactive HTML wit
 | `phase_series.csv` | per spectrum: λc, φ(λa), φ(λb), readout, cubic-fit RMS, extrema between λa and λb |
 | `phase_pair_scan.csv` | temperature sensitivity, R², scatter and resolution of the readout for every wavelength pair on a 5 nm grid |
 | `phase_vs_tracking.csv` | phase change implied by peak tracking, per fringe (common part + tilt) |
+| `fig23_phase_validation.png` / `phase_validation.csv` | **SIMULATED** check of the phase readout against a known answer, four scenarios (`scripts/validate_phase.py`) |
 | `movie_phase.gif` / `.mp4` | the phase-unwrapping readout animated (`scripts/make_movie.py --phase`) |
 | `movie_run.gif` / `.mp4` | the run animated: spectrum + extrema per frame, map with time cursor, tracked fringe growing (`scripts/make_movie.py`) |
 | `fig20_calibration_models.png` | linear vs quadratic calibration of the detailed fringe with both residual series (`run_analysis.py`) |
@@ -240,6 +254,16 @@ continuous cooldown. The steps in figs 10–12 are fringe-hops of the tracker
 in figs 9 and 14 are binning / sampling of the smooth drift. A physical
 staircase like the strain experiment's requires a stepped input.
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest          # ~1.5 min: loader layouts, headline numbers, phase method, app smoke test
+```
+
+The same suite runs on GitHub Actions on every push to `main`
+(`.github/workflows/tests.yml`).
+
 ## Package layout
 
 ```
@@ -249,6 +273,7 @@ sms_analysis/
   tracking.py   windowed fringe tracking with fringe-hop rejection
   analysis.py   linear and quadratic λ(T) fits, curvature test, per-fringe sensitivity table
   phase.py      phase-unwrapping readout of SM1E.2 (cubic Δφ(λ), λc, phase difference, pair scan)
+  synthetic.py  SIMULATED spectra with a known phase change, for tests only
   plotting.py   all figures
 scripts/
   run_analysis.py   end-to-end pipeline (CLI)

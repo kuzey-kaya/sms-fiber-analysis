@@ -49,7 +49,10 @@ by header regex `temp|sicak|°c` and `time|zaman|sec`), missing temperature
 (`SpectraSet.has_temperature == False` → calibration steps are skipped, maps/tracking
 still run), **transposed files** (rows = wavelengths, columns = spectra; detected by
 `_looks_like_wavelength_axis` on the first column), `;`/tab separators and decimal
-commas. Tested on six layout variants on 2026-10-04. If a new file fails, run
+commas. Tested on six layout variants on 2026-10-04. Fixed 2026-10-08 (found by the new
+tests): a ';'-separated file whose *headers* use decimal commas ("1500,1") was split on the
+commas by the sniffer; `_read_table` now tries ';' / tab / ',' with '.' or ',' decimals and keeps
+the parse with the most wavelength columns (`_layout_score`). If a new file fails, run
 `scripts/inspect_csv.py <file>` first; the explicit override is
 `load_sms_csv(path, temp_col=..., time_col=...)`.
 
@@ -81,6 +84,18 @@ It is a continuous cooldown — no setpoint steps.
   labelling — our choice, not in the paper), `phase_fits`, `phase_series` (readout |φ(λb) − φ(λa)|,
   default 1545/1570 nm as in the paper), `phase_sensitivity`, `scan_pairs`, `tracked_phase_change`.
   Added 2026-10-07.
+- `sms_analysis/synthetic.py` — SIMULATED spectra (`simulate_run`): the real first-spectrum cubic
+  (`REAL_PROFILE`, centred on 1525 nm) plus a known `common_rad` shift and a `tilt_rad` change of
+  φ(λb) − φ(λa); returns the data and the true readout. Tests/validation only, never data.
+- `scripts/validate_phase.py` — fig23 + `phase_validation.csv` (SIMULATED, 4 scenarios). 2026-10-08:
+  readout recovers a 7 rad tilt under a 10π common shift within 0.12 rad, 0 failed fits, no jumps;
+  peak tracker keeps only 8/25 fringes on that run. λc choice checked on the real run: fixed 1525,
+  1 candidate or all extrema as candidates give an identical readout (no temporal seed at all
+  deviates ≤ 0.18 rad on a few frames, same slope).
+- `tests/` (pytest, `pytest.ini`, `requirements-dev.txt`; ~80 s) — loader layouts, headline numbers,
+  staircase table, phase method (real + simulated + λc choice), headless app smoke test.
+  `.github/workflows/tests.yml` runs it on every push to `main`. Run `python -m pytest` before
+  handing anything to the advisor.
 - `scripts/phase_analysis.py` — fig21 (paper Fig. 1 counterpart), fig22 (paper Fig. 2 counterpart +
   λc vs T), `phase_series.csv`, `phase_pair_scan.csv`, `phase_vs_tracking.csv`; `--lambda-a/-b`.
   App: "Phase" tab (same content, pair inputs, best-pair table, common-mode explanation).
@@ -147,7 +162,9 @@ It is a continuous cooldown — no setpoint steps.
   growing); at the end of the cooldown the λc extremum turns from dip to peak (24 → 25 extrema).
 - App Movie tab has a radio `movie_kind` at the top: "Spectra and fringes" (the original body,
   indented under `else:`) or "Phase readout (SM1E.2)" (`phase_movie_figure`, frames update traces
-  1,2,4,5,6,7,8; pair read from the Phase tab's `phase_a`/`phase_b` session keys; `phase_movie_gif`).
+  1,2,3,5,6,7,8,9; the λ±n labels are their own `mode="text"` trace with 7 fixed slots because
+  Plotly does not animate a text array whose length changes (24 → 25 extrema) — labels vanished
+  before 2026-10-08; pair read from the Phase tab's `phase_a`/`phase_b` keys; `phase_movie_gif`).
 - `app.py` Movie tab — Plotly animation (`movie_figure`, ≤ 150 frames, ≤ 500 wavelength points per
   frame; trace order documented in its docstring, frames update traces 1–8; play/pause + time
   slider) with the same options under "Movie options" plus `panel` = One fringe / All fringes
@@ -252,5 +269,7 @@ SM1E.2 (phase unwrapping, wide dynamic range); Chen 2025 Optica Sensing JM4A.8 (
 
 ## Testing checklist before handing anything to the advisor
 
-`python3 scripts/inspect_csv.py` → all four scripts with no arguments → `ls figures` shows
-fig1–fig19 and the CSVs → numbers above unchanged for data/data.csv.
+`python -m pytest` (checks the numbers above automatically) → `python3 scripts/inspect_csv.py` →
+the scripts with no arguments → `ls figures` shows fig1–fig23 and the CSVs.
+The strain CSV is still not on this machine (searched Downloads, OneDrive/Masaüstü/fiberoptic and
+all zip packages on 2026-10-08: every CSV there is the same 2024-10-17 cooldown run).
