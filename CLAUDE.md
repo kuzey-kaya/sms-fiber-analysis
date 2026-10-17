@@ -150,9 +150,13 @@ It is a continuous cooldown — no setpoint steps.
   Load steps: `sms_analysis/steps.py` (`detect_plateaus` median-filtered jump split + merge of
   short segments; `classify_plateaus` drift-tolerant baseline; `default_step_values`;
   `step_condition` with `settle` rows blanked; `baseline_drift`). The app draws the header into
-  `header_slot` so the step expander (`use_steps_<key>`, `data_editor`) can decide the condition
-  first; `_apply_step_condition` swaps `data.temperature` and every track's `temperature` column.
-  "Fringes in detail" = `st.multiselect(key="detail_fringes", max_selections=10)` →
+  `header_slot` so the step expander (`data_editor`) can decide the condition first; the choice is
+  the sidebar radio "4 · Condition" (`cond_mode_<data_key>`: "Column in the file" / "Load steps (by
+  hand)", defaulting to steps when plateaus were found — the owner wanted both options visible for
+  every file, 2026-10-17); `_apply_step_condition` swaps `data.temperature` and every track's `temperature` column.
+  "Fringes in detail" = radio `detail_mode` ("One fringe (Igor style)" → `selectbox` key
+  `detail_fringe`, `igor_figure` + `calibration_figure`; "Several fringes" →
+  `st.multiselect(key="detail_fringes", max_selections=10)`) →
   `igor_multi_figure` / `calibration_multi_figure`. Tests: `tests/test_steps.py`,
   `test_app.py::test_stepped_run_auto_tracker_and_step_condition` (simulated CSV via
   `steps_csv` fixture + `FRINGELAB_EXAMPLE`). "Tracked" in the app = locked ≥ 90 % of frames (21/24 on

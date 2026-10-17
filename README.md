@@ -115,15 +115,17 @@ them (`sms_analysis.steps.detect_plateaus`, on the locked fringe with the cleane
 steps) and shows *Load steps — condition by hand* above the tabs: one row per
 plateau with its time span, shift and a value column, pre-filled as 0 for the
 unloaded plateaus and *first load + n × increment* for the loaded ones (default
-50 g steps — edit to match the experiment). Ticking *Use these step values as the
-condition* replaces the condition everywhere (calibration, sensitivity table,
-maps, movie readout), with the first and last spectra of every plateau left out,
+50 g steps — edit to match the experiment). The sidebar section *4 · Condition*
+offers *Column in the file* and *Load steps (by hand)* for every file; a stepped
+run starts on the latter, which replaces the condition everywhere (calibration,
+sensitivity table, maps, movie readout), with the first and last spectra of every plateau left out,
 so the sensitivity comes out per gram — Igor's *shift vs mass*. On the strain
 file (assuming 50 g steps): dip@1552.8 +11.8 pm/g, dip@1491.1 −18.4 pm/g,
 R² ≈ 0.99; the unloaded level drifts +0.22 nm over the run with the temperature.
 
-**Several fringes at once.** *Fringes in detail* on the Fringe tracking tab takes
-up to 10 fringes: their shifts against time with the condition on the right axis,
+**One or several fringes.** *Fringes in detail* on the Fringe tracking tab shows
+one fringe Igor-style (wavelength and condition against time, calibration with
+residuals) or up to 10 fringes: their shifts against time with the condition on the right axis,
 shift vs condition with one linear fit per fringe, and a table of the
 sensitivities.
 

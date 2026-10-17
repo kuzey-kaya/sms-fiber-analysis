@@ -1158,21 +1158,37 @@ def _apply_step_condition(cond: np.ndarray):
     tracked = table[table["locked_pct"] >= min_lock]
 
 
+COND_MODES = ["Column in the file", "Load steps (by hand)"]
+mode_key = f"cond_mode_{data_key}"
+if mode_key not in st.session_state:
+    # First time this file is seen: a stepped run with only a drifting temperature column starts
+    # on the load-step condition (set before the widget exists, as with the tracker choice).
+    st.session_state[mode_key] = COND_MODES[1] if plateaus is not None else COND_MODES[0]
+with st.sidebar.expander("4 · Condition", expanded=True):
+    cond_mode = st.radio(
+        "What the wavelength is calibrated against", COND_MODES, key=mode_key,
+        help="Column in the file: the temperature/strain column found in the file (name it under "
+             "*Condition and columns* if it was missed). Load steps: a staircase run — weights put on "
+             "and taken off — where the file has no load column; enter one value per plateau in the "
+             "table above the tabs.")
+    if plateaus is not None:
+        st.caption(f"{len(plateaus)} plateaus found on {step_ref} — this looks like a load-step run.")
+    elif cond_mode == COND_MODES[1]:
+        st.warning("No clear steps found on any tracked fringe; the file's column is used instead.")
+use_steps = cond_mode == COND_MODES[1] and plateaus is not None
+
 header_slot = st.container()     # the header is drawn below, after the step editor has had its say
 if plateaus is not None:
     loaded = classify_plateaus(plateaus)
-    use_key = f"use_steps_{data_key}"
     with st.expander(f"Load steps — condition by hand ({len(plateaus)} plateaus found on {step_ref}, "
-                     f"{int(loaded.sum())} with a load)", expanded=not st.session_state.get(use_key, False),
-                     icon=":material/stairs:"):
+                     f"{int(loaded.sum())} with a load)", expanded=use_steps, icon=":material/stairs:"):
         ctl, tbl = st.columns([1, 1.6])
         with ctl:
             st.markdown("The wavelength sits on plateaus separated by jumps: a load was put on and "
                         "taken off. The file carries no load column, so enter one value per plateau "
-                        "and the sensitivity comes out per unit of load, like Igor's *shift vs mass*.")
-            use_steps = st.checkbox("Use these step values as the condition", key=use_key,
-                                    help="Replaces the condition column (temperature) by the values in the "
-                                         "table for calibration, sensitivity, maps and the movie readout.")
+                        "and the sensitivity comes out per unit of load, like Igor's *shift vs mass*."
+                        + ("" if use_steps else " **Not in use** — choose *Load steps (by hand)* under "
+                                                "*4 · Condition* in the sidebar to calibrate against these values."))
             ref_options = list(tracked["fringe"])
             ref_choice = st.selectbox("Reference fringe for the step detection", ref_options,
                                       index=ref_options.index(step_ref), key=f"step_ref_{data_key}")
@@ -1239,8 +1255,8 @@ stat_strip([
     ("Fringes tracked", f"{len(tracked)} / {len(table)}", f"locked ≥ {min_lock} % of spectra"),
 ])
 if cond_source == "steps":
-    st.caption(f"Condition = {cond_name} entered per load step (*Load steps* below); the file's own "
-               f"column is not used.")
+    st.caption(f"Condition = {cond_name} entered per load step (*Load steps* below, chosen under "
+               f"*4 · Condition*); the file's own column is not used.")
 header_slot.__exit__(None, None, None)
 with st.expander("How the file was read · file format guide"):
     st.dataframe(read_report(full, cond_name, cond_unit), hide_index=True, width="stretch")
@@ -1342,12 +1358,18 @@ with tab_track:
                    else (tracked["fringe"].iloc[0] if len(tracked) else table["fringe"].iloc[0]))
         labels = list(table["fringe"])
         lock_of = table.set_index("fringe")["locked_pct"]
-        chosen = st.multiselect(
-            f"Fringes (type @ wavelength in the first spectrum; up to {MAX_DETAIL_FRINGES})", labels,
-            default=[default], max_selections=MAX_DETAIL_FRINGES, key="detail_fringes",
-            format_func=lambda k: f"{k} nm · locked {lock_of[k]:.0f}%")
-        if not chosen:
-            chosen = [default]
+        fmt = lambda k: f"{k} nm · locked {lock_of[k]:.0f}%"  # noqa: E731
+        detail_mode = st.radio("Show", ["One fringe (Igor style)", "Several fringes"], horizontal=True,
+                               key="detail_mode", label_visibility="collapsed")
+        if detail_mode == "Several fringes":
+            chosen = st.multiselect(
+                f"Fringes (type @ wavelength in the first spectrum; up to {MAX_DETAIL_FRINGES})", labels,
+                default=[default], max_selections=MAX_DETAIL_FRINGES, key="detail_fringes", format_func=fmt)
+            if not chosen:
+                chosen = [default]
+        else:
+            chosen = [st.selectbox("Fringe (type @ wavelength in the first spectrum)", labels,
+                                   index=labels.index(default), key="detail_fringe", format_func=fmt)]
         label = chosen[0]
         track = tracks[label]
         left, right = st.columns(2)

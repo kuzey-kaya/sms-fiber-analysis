@@ -164,11 +164,12 @@ GitHub's free monthly allowance is limited.
   fit* by itself and says so above the tabs (*3 · Fringe tracking* changes it back).
 - **Load steps without a load column:** when the run is a staircase (load put on
   and taken off), *Load steps — condition by hand* appears above the tabs. Enter
-  the load of every plateau (pre-filled with 50 g steps), tick *Use these step
-  values as the condition*, and the Sensitivity and Fringe tracking tabs report
-  pm per gram instead of pm per °C.
-- **Several fringes at once:** on the Fringe tracking tab, *Fringes in detail*
-  accepts up to 10 fringes.
+  the load of every plateau (pre-filled with 50 g steps); with *4 · Condition* →
+  *Load steps (by hand)* in the sidebar (chosen automatically for a stepped run)
+  the Sensitivity and Fringe tracking tabs report pm per gram instead of pm per °C.
+  *Column in the file* switches back to the file's own temperature/strain column.
+- **One or several fringes:** on the Fringe tracking tab, *Fringes in detail* shows
+  one fringe Igor-style or up to 10 fringes together.
   An uploaded file is processed by the computer that runs the app; with 4b or 4c
   that is a cloud server.
 - **As the default example:** replace `data/data.csv` with your file.

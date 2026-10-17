@@ -48,6 +48,7 @@ def test_several_fringes_in_detail():
     # Fresh session: the module fixture has set the calibration radio, which is not drawn
     # while several fringes are selected, and AppTest cannot carry that state across.
     at = AppTest.from_file(APP, default_timeout=300).run()
+    at.radio(key="detail_mode").set_value("Several fringes").run()
     ms = at.multiselect(key="detail_fringes")
     ms.set_value(ms.options[:3]).run()
     assert not at.exception, [str(e.value) for e in at.exception]
@@ -70,11 +71,18 @@ def test_stepped_run_auto_tracker_and_step_condition(steps_csv):
 def _check_stepped_run(at):
     assert not at.exception, [str(e.value) for e in at.exception]
     assert at.session_state["track_mode"] == "Fringe-width fit" and at.session_state["reject_jumps"] is False
-    box = [c for c in at.checkbox if c.label.startswith("Use these step values")]
-    assert len(box) == 1
-    box[0].check().run()
-    assert not at.exception, [str(e.value) for e in at.exception]
+    def mode_radio():   # re-fetched after every run: elements belong to one run's tree
+        found = [r for r in at.sidebar.radio if r.value in ("Column in the file", "Load steps (by hand)")]
+        assert len(found) == 1
+        return found[0]
+
+    assert mode_radio().value == "Load steps (by hand)"                      # chosen automatically
     assert any("entered per load step" in c.value for c in at.caption)
+    mode_radio().set_value("Column in the file").run()                       # the file's column still works
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert not any("entered per load step" in c.value for c in at.caption)
+    mode_radio().set_value("Load steps (by hand)").run()
+    assert not at.exception, [str(e.value) for e in at.exception]
     sens = [d.value for d in at.dataframe if "sensitivity (pm/g)" in d.value.columns and "R²" in d.value.columns]
     assert sens and (sens[0]["R²"] > 0.99).all()
     assert sens[0]["sensitivity (pm/g)"].between(55, 65).all()        # 3 nm per 50 g
@@ -90,3 +98,6 @@ def test_shipped_strain_example():
     assert at.session_state["track_mode"] == "Fringe-width fit"
     assert any("17 plateaus found on dip@1552.8" in e.label for e in at.expander)
     assert any("20 / 20" in m.value for m in at.markdown)
+    assert any("entered per load step" in c.value for c in at.caption)      # load steps chosen by default
+    at.radio(key="detail_mode").set_value("One fringe (Igor style)").run()
+    assert not at.exception
