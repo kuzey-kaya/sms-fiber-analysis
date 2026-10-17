@@ -152,6 +152,8 @@ GitHub's free monthly allowance is limited.
 
 ## 5. Using your own data
 
+- **Two example runs** are built in (sidebar → *1 · Data*): the cooldown and the
+  load-step experiment of 2026-10-15.
 - **In the app:** sidebar → *1 · Data* → **Upload a CSV file**. The start page
   shows the expected layout and offers a template CSV to download; after loading,
   *How the file was read* (above the tabs) reports how each column was

@@ -146,7 +146,7 @@ It is a continuous cooldown — no setpoint steps.
   saw noise): the choice is automatic — once per file (`auto_checked`/`auto_switched` in session
   state) the standard tracker is probed with default settings *before the widgets are drawn*
   (widget keys cannot be set afterwards) and, if `_poor_lock`, `track_mode`/`reject_jumps` are set.
-  `FRINGELAB_EXAMPLE=<path>` makes another file the example run (tests, local trials).
+  `FRINGELAB_EXAMPLE=<path>` adds another example run, listed first (tests, local trials).
   Load steps: `sms_analysis/steps.py` (`detect_plateaus` median-filtered jump split + merge of
   short segments; `classify_plateaus` drift-tolerant baseline; `default_step_values`;
   `step_condition` with `settle` rows blanked; `baseline_drift`). The app draws the header into
@@ -297,8 +297,8 @@ SM1E.2 (phase unwrapping, wide dynamic range); Chen 2025 Optica Sensing JM4A.8 (
 
 `python -m pytest` (checks the numbers above automatically) → `python3 scripts/inspect_csv.py` →
 the scripts with no arguments → `ls figures` shows fig1–fig23 and the CSVs.
-A strain run arrived 2026-10-17: `~/Downloads/sms-strain-2026-10-15-norm-fringelab.csv` (not in the
-repo — data publication still undecided): 914 spectra, 1425–1625 nm at 0.2 nm, one every 3.6 s,
+A strain run arrived 2026-10-17 and ships as `data/strain.csv` (the second example run in the app,
+`EXAMPLES` in app.py; added to the public repo on the owner's instruction 2026-10-17): 914 spectra, 1425–1625 nm at 0.2 nm, one every 3.6 s,
 55 min, columns temperature (21.7–22.7 °C, no load column) + time. Load is put on and taken off
 8 times (~3 min each, back to baseline between); with the width fit the dip at 1491.1 nm sits at
 −1.16, −2.10, −2.99, −3.84, −4.62, −5.37, −6.13, −8.28 nm on the loaded plateaus (dip@1552.8:

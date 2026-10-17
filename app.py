@@ -40,8 +40,16 @@ from sms_analysis.steps import (classify_plateaus, default_step_values, detect_p
 
 APP_NAME = "FringeLab"
 ROOT = Path(__file__).resolve().parent
-# FRINGELAB_EXAMPLE=<path> makes another file the "example run" (tests, trying a new file locally).
-EXAMPLE_CSV = Path(os.environ.get("FRINGELAB_EXAMPLE", "") or ROOT / "data" / "data.csv")
+# The example runs offered in the sidebar (label -> file). FRINGELAB_EXAMPLE=<path> adds another
+# one, listed first (tests, trying a new file locally).
+EXAMPLES = {
+    "Cooldown run (data/data.csv)": ROOT / "data" / "data.csv",
+    "Load steps run (data/strain.csv)": ROOT / "data" / "strain.csv",
+}
+if os.environ.get("FRINGELAB_EXAMPLE"):
+    _extra = Path(os.environ["FRINGELAB_EXAMPLE"])
+    EXAMPLES = {f"Example run ({_extra.name})": _extra, **EXAMPLES}
+EXAMPLES = {k: v for k, v in EXAMPLES.items() if v.exists()}
 MAX_DETAIL_FRINGES = 10
 FRINGE_COLORS = plotly.colors.qualitative.D3
 
@@ -243,9 +251,10 @@ def _col(text: str):
 @st.cache_data(show_spinner="Reading the file…")
 def load_data(file_bytes: bytes | None, suffix: str, cond_col, time_col,
               example_stamp: str = "") -> SpectraSet:
-    # example_stamp only keys the cache: a replaced data/data.csv is re-read.
+    # example_stamp = "<path>:<mtime>" of the example file; it keys the cache, so a replaced
+    # example file is re-read.
     if file_bytes is None:
-        return load_sms_csv(EXAMPLE_CSV, temp_col=cond_col, time_col=time_col)
+        return load_sms_csv(example_stamp.rsplit(":", 1)[0], temp_col=cond_col, time_col=time_col)
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / f"upload{suffix}"
         path.write_bytes(file_bytes)
@@ -981,12 +990,13 @@ brand_slot.markdown(f'<div class="fl-brand">{brand_icon()}{APP_NAME}<small>Explo
                     'peaks, fringe tracking, calibration.</small></div>', unsafe_allow_html=True)
 
 st.sidebar.header("1 · Data")
-sources = ["Upload a CSV file"]
-if EXAMPLE_CSV.exists():
-    sources.insert(0, "Example run (data/data.csv)" if EXAMPLE_CSV == ROOT / "data" / "data.csv"
-                   else f"Example run ({EXAMPLE_CSV.name})")
-source = st.sidebar.radio("Source", sources, label_visibility="collapsed")
+sources = [*EXAMPLES, "Upload a CSV file"]
+source = st.sidebar.radio("Source", sources, label_visibility="collapsed",
+                          help="Two runs ship with the app: a continuous cooldown (temperature) and a "
+                               "load experiment (weights put on and taken off; enter the loads under "
+                               "Load steps above the tabs).")
 
+EXAMPLE_CSV = EXAMPLES.get(source) or next(iter(EXAMPLES.values()), ROOT / "data" / "data.csv")
 file_bytes, suffix, file_name = None, ".csv", EXAMPLE_CSV.name
 example_stamp = f"{EXAMPLE_CSV}:{EXAMPLE_CSV.stat().st_mtime_ns}" if EXAMPLE_CSV.exists() else ""
 if source == "Upload a CSV file":

@@ -36,6 +36,11 @@ tracking still run; calibration is skipped), transposed files (rows =
 wavelengths), `;`/tab separators and decimal commas. `scripts/inspect_csv.py`
 shows how a file is read.
 
+`data/strain.csv` (the 2026-10-15 load run, originally `sms-strain-2026-10-15-norm-fringelab.csv`):
+914 spectra, 1425–1625 nm at 0.2 nm, one every 3.6 s, 55 min; weights put on and taken off 8 times.
+Its temperature column (21.7–22.7 °C) is only the room drift — the loads are not in the file,
+they are entered in the app under *Load steps*.
+
 `data/data.csv` (the 2024-10-17 run, originally `smsdata20241017.csv`): 730 spectra, 1475–1575 nm at 0.1 nm steps,
 cooldown 44 °C → 22.8 °C over ~4.8 h, one spectrum every ~23 s.
 
@@ -80,8 +85,8 @@ loaded file was interpreted.
 | Movie | two movies, chosen at the top of the tab. *Spectra and fringes*: the run frame by frame (spectrum + extrema with fading trails, big temperature readout, map cursor, one fringe or all fringes in the lower-right panel) with Δ view and a camera that follows a fringe. *Phase readout (SM1E.2)*: numbered extrema, the cubic Δφ(λ) and λc moving, the readout growing (pair taken from the Phase tab). Both with play/pause, a time slider and GIF export for slides |
 | Export | tracked fringes (wide/long CSV), fringe table, the settings used |
 
-Sidebar settings: data source (the example run `data/data.csv` or an uploaded
-file), condition name/unit and column overrides (for runs where strain, load, …
+Sidebar settings: data source (the two example runs — the cooldown `data/data.csv`
+and the load-step run `data/strain.csv` — or an uploaded file), condition name/unit and column overrides (for runs where strain, load, …
 was varied instead of temperature), wavelength range, detection (prominence,
 separation, smoothing) and tracking (fringe position: *Standard* or
 *Fringe-width fit*, search window, jump rejection). The defaults are the values

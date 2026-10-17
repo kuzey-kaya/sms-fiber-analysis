@@ -78,3 +78,15 @@ def _check_stepped_run(at):
     sens = [d.value for d in at.dataframe if "sensitivity (pm/g)" in d.value.columns and "R²" in d.value.columns]
     assert sens and (sens[0]["R²"] > 0.99).all()
     assert sens[0]["sensitivity (pm/g)"].between(55, 65).all()        # 3 nm per 50 g
+
+
+def test_shipped_strain_example():
+    """The second example run: the fringe-width fit is chosen, 20/20 fringes locked, 17 plateaus."""
+    if not (Path(APP).parent / "data" / "strain.csv").exists():
+        pytest.skip("data/strain.csv not present")
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    at.sidebar.radio[0].set_value("Load steps run (data/strain.csv)").run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert at.session_state["track_mode"] == "Fringe-width fit"
+    assert any("17 plateaus found on dip@1552.8" in e.label for e in at.expander)
+    assert any("20 / 20" in m.value for m in at.markdown)
