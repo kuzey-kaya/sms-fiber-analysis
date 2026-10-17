@@ -111,5 +111,14 @@ def test_shipped_strain_example():
     assert any("17 plateaus found on dip@1552.8" in e.label for e in at.expander)
     assert any("20 / 20" in m.value for m in at.markdown)
     assert any("entered per load step" in c.value for c in at.caption)      # load steps chosen by default
+    assert any("Flickering fringe" in c.value and "peak@1529.8" in c.value for c in at.caption)
+    assert at.checkbox(key="hide_flicker").value
+    assert "peak@1529.8" not in at.selectbox(key="detail_fringe").value       # never the default
     at.radio(key="detail_mode").set_value("One fringe (Igor style)").run()
     assert not at.exception
+    at.radio(key="movie_kind").set_value("Spectra and fringes").run()
+    at.toggle(key="movie_build").set_value(True).run()                        # smoothed + width-fit movie
+    assert not at.exception, [str(e.value) for e in at.exception]
+    smooth_box = [c for c in at.checkbox if c.label == "Draw the smoothed spectrum"]
+    fit_box = [c for c in at.checkbox if c.label == "Width-fit the peaks and dips"]
+    assert smooth_box[0].value and fit_box[0].value                           # noisy, width-fit run

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .io import SpectraSet
-from .peaks import detect_extrema, parabolic_refine, smooth
+from .peaks import ExtremaSet, detect_extrema, parabolic_refine, smooth
 
 
 def track_feature(
@@ -137,6 +137,49 @@ def fit_vertex(wl: np.ndarray, y: np.ndarray, center: float, half_width: float,
     if abs(off) > half_width:
         return np.nan, np.nan
     return float(center + off), float(c - b * b / (4.0 * a))
+
+
+def flicker_fraction(wavelength: np.ndarray, threshold: float = 0.2) -> float:
+    """Share (%) of frames on which the tracked position reverses: a jump of more than
+    ``threshold`` nm immediately followed by one of the opposite sign.
+
+    A real fringe moves smoothly — a fast one near the critical wavelength can
+    move 0.3 nm per frame, but always in the same direction, and a load step is
+    one jump in hundreds of frames.  A fringe whose top is so flat that two
+    samples compete for the maximum (the one at λc on the 2026-10-15 strain run)
+    zig-zags on a sixth of its frames.  Such a fringe "flickers": it is still
+    tracked, but it should not be the default anywhere.
+    """
+    w = np.asarray(wavelength, float)
+    w = w[np.isfinite(w)]
+    if w.size < 4:
+        return float("nan")
+    d = np.diff(w)
+    rev = (np.abs(d[:-1]) > threshold) & (np.abs(d[1:]) > threshold) & (np.sign(d[:-1]) != np.sign(d[1:]))
+    return float(100.0 * rev.mean())
+
+
+def refine_width_fit(wl: np.ndarray, y: np.ndarray, ext: ExtremaSet) -> ExtremaSet:
+    """Re-position every extremum of ``ext`` with :func:`fit_vertex` over half its local spacing.
+
+    The same estimate the fringe-width tracker uses, applied to one spectrum's
+    detected extrema — for display (movie frames) on noisy or wide fringes.
+    An extremum whose fit fails keeps its 3-point position.
+    """
+    pos = np.r_[ext.peak_wavelengths, ext.dip_wavelengths]
+    if pos.size < 2:
+        return ext
+    halves = half_periods(pos)
+    out = []
+    for i, (w0, kind) in enumerate([(p, "peak") for p in ext.peak_wavelengths]
+                                   + [(d, "dip") for d in ext.dip_wavelengths]):
+        h = halves[i]
+        w, v = fit_vertex(wl, y, float(w0), 0.5 * h, kind) if np.isfinite(h) else (np.nan, np.nan)
+        out.append((w, v) if np.isfinite(w) else (float(w0), float(np.interp(w0, wl, y))))
+    n_p = len(ext.peak_wavelengths)
+    pw = np.array([o[0] for o in out[:n_p]]); pv = np.array([o[1] for o in out[:n_p]])
+    dw = np.array([o[0] for o in out[n_p:]]); dv = np.array([o[1] for o in out[n_p:]])
+    return ExtremaSet(pw, pv, dw, dv)
 
 
 def half_periods(positions: np.ndarray) -> np.ndarray:

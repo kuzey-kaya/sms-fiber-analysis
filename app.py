@@ -31,6 +31,8 @@ from plotly.subplots import make_subplots
 
 from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_sms_csv,
                           track_all_extrema)
+from sms_analysis.peaks import smooth
+from sms_analysis.tracking import flicker_fraction, refine_width_fit
 from sms_analysis.io import SpectraSet
 from sms_analysis.movie import frame_rows, render_movie, render_phase_movie
 from sms_analysis.phase import (PAPER_LAMBDA_A, PAPER_LAMBDA_B, phase_fits, phase_sensitivity,
@@ -362,6 +364,7 @@ def fringe_table(tracks: dict[str, pd.DataFrame], has_cond: bool) -> pd.DataFram
                    end_nm=ok["wavelength"].iloc[-1] if len(ok) else np.nan,
                    shift_nm=(ok["wavelength"].iloc[-1] - ok["wavelength"].iloc[0]) if len(ok) else np.nan,
                    locked_pct=100.0 * len(ok) / max(len(tr), 1),
+                   flicker_pct=flicker_fraction(tr["wavelength"].to_numpy()),
                    sensitivity_pm=np.nan, stderr_pm=np.nan, r_squared=np.nan,
                    rmse_linear_pm=np.nan, rmse_quadratic_pm=np.nan,
                    sens_at_min_pm=np.nan, sens_at_max_pm=np.nan)
@@ -378,10 +381,39 @@ def fringe_table(tracks: dict[str, pd.DataFrame], has_cond: bool) -> pd.DataFram
             except ValueError:
                 pass
         rows.append(row)
-    cols = ["fringe", "kind", "start_nm", "end_nm", "shift_nm", "locked_pct",
+    cols = ["fringe", "kind", "start_nm", "end_nm", "shift_nm", "locked_pct", "flicker_pct",
             "sensitivity_pm", "stderr_pm", "r_squared",
             "rmse_linear_pm", "rmse_quadratic_pm", "sens_at_min_pm", "sens_at_max_pm"]
-    return pd.DataFrame(rows, columns=cols).sort_values("start_nm").reset_index(drop=True)
+    out = pd.DataFrame(rows, columns=cols).sort_values("start_nm").reset_index(drop=True)
+    # a fringe that reverses by > 0.2 nm on more than 5 % of its frames flickers (flat top near
+    # the critical wavelength, two samples competing for the extremum); still tracked, never a default
+    out["stable"] = ~(out["flicker_pct"] > FLICKER_LIMIT_PCT)
+    return out
+
+
+FLICKER_LIMIT_PCT = 5.0
+
+
+def spectral_noise(data: SpectraSet) -> float:
+    """Noise level of the spectra (transmittance units) from the second difference along wavelength."""
+    x = data.spectra
+    if x.shape[1] < 3:
+        return 0.0
+    r = x[:, 2:] - 2.0 * x[:, 1:-1] + x[:, :-2]
+    return float(np.nanstd(r) / np.sqrt(6.0))
+
+
+def pick_default(table: pd.DataFrame, tracked: pd.DataFrame, has_cond: bool) -> str:
+    """Default fringe for the detail views: the most sensitive stable one (R² ≥ 0.9), else the first stable."""
+    pool = tracked[tracked["stable"]] if len(tracked) and tracked["stable"].any() else tracked
+    if has_cond and len(pool):
+        ranked = pool.dropna(subset=["sensitivity_pm"])
+        ranked = ranked[ranked["r_squared"] >= 0.9]
+        if len(ranked):
+            return ranked.loc[ranked["sensitivity_pm"].abs().idxmax(), "fringe"]
+    if len(pool):
+        return pool["fringe"].iloc[0]
+    return table["fringe"].iloc[0]
 
 
 # --------------------------------------------------------------------------
@@ -611,11 +643,13 @@ MOVIE_MAX_FRAMES, MOVIE_MAX_COLS = 150, 500
 
 @st.cache_data(show_spinner="Finding the extrema of every frame…")
 def movie_extrema(_data: SpectraSet, data_key: str, rows: tuple, prominence: float, distance: int,
-                  smooth_window: int):
+                  smooth_window: int, width_fit: bool = False):
     out = []
     for r in rows:
         ext = detect_extrema(_data.wavelengths, _data.spectra[r], prominence=prominence,
                              distance=distance, smooth_window=smooth_window)
+        if width_fit:
+            ext = refine_width_fit(_data.wavelengths, _data.spectra[r], ext)
         out.append((ext.peak_wavelengths, ext.peak_values, ext.dip_wavelengths, ext.dip_values))
     return out
 
@@ -648,8 +682,11 @@ def _delta_at(wl, spec, spec0, x):
 
 def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, fps, *,
                  mode="Transmittance", follow_nm=None, trail=8, mark_fringe=True,
-                 panel="One fringe", all_tracks=None, big_readout=True):
+                 panel="One fringe", all_tracks=None, big_readout=True, spectra_disp=None):
     """Plotly animation of the run.
+
+    ``spectra_disp``: optional array drawn in place of the raw spectra (smoothed display);
+    the extrema values are read off the drawn curve.
 
     Trace order (frames update by index):
       0 first spectrum (static)      1 current spectrum     2 trail of past extrema
@@ -662,7 +699,8 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
     t_min = data.time / 60.0
     has_cond = data.has_temperature
     delta = mode == "Change from first spectrum"
-    s0 = data.spectra[0]
+    disp = spectra_disp if spectra_disp is not None else data.spectra
+    s0 = disp[0]
     panel_title = {"One fringe": f"Tracked {track_label}", "All fringes": "All fringes: shift from start"}.get(panel, "")
     fig = make_subplots(rows=2, cols=2, specs=[[{"rowspan": 2}, {}], [None, {"secondary_y": True}]],
                         column_widths=[0.58, 0.42], vertical_spacing=0.16, horizontal_spacing=0.1,
@@ -682,21 +720,19 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
             shifts[lab] = w - (first[0] if len(first) else np.nan)
 
     def spec_y(r):
-        y = data.spectra[r]
+        y = disp[r]
         return (y - s0) if delta else y
 
     def frame_traces(k):
         r = rows[k]
-        pw, pv, dw, dv = extrema[k]
-        if delta:
-            pv, dv = _delta_at(wl, data.spectra[r], s0, pw), _delta_at(wl, data.spectra[r], s0, dw)
+        pw, _, dw, _ = extrema[k]
+        pv, dv = np.interp(pw, wl, spec_y(r)), np.interp(dw, wl, spec_y(r))   # values on the drawn curve
         # trail: extrema of the previous `trail` frames, fading out
         tx, ty, tsym, top = [], [], [], []
         for j in range(max(0, k - trail), k):
             rj = rows[j]
-            qw, qv, ew, ev = extrema[j]
-            if delta:
-                qv, ev = _delta_at(wl, data.spectra[rj], s0, qw), _delta_at(wl, data.spectra[rj], s0, ew)
+            qw, _, ew, _ = extrema[j]
+            qv, ev = np.interp(qw, wl, spec_y(rj)), np.interp(ew, wl, spec_y(rj))
             op = 0.08 + 0.5 * (j - (k - trail) + 1) / (trail + 1)
             tx += list(qw) + list(ew); ty += list(qv) + list(ev)
             tsym += ["circle"] * len(qw) + ["triangle-down"] * len(ew); top += [op] * (len(qw) + len(ew))
@@ -741,11 +777,11 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
 
     # axis ranges first (frame traces need them)
     if delta:
-        d_all = data.spectra[::max(1, len(data) // 100)] - s0
+        d_all = disp[::max(1, len(data) // 100)] - s0
         lim = float(np.nanpercentile(np.abs(d_all), 99.5)) or 0.1
         y_range = (-1.08 * lim, 1.30 * lim)
     else:
-        lo, hi = np.nanmin(data.spectra), np.nanmax(data.spectra)
+        lo, hi = np.nanmin(disp), np.nanmax(disp)
         y_range = (lo - 0.04 * (hi - lo), hi + 0.18 * (hi - lo))
     if shifts:
         allv = np.concatenate([v[np.isfinite(v)] for v in shifts.values()] or [np.array([0.0])])
@@ -972,12 +1008,14 @@ def phase_movie_gif(_data: SpectraSet, _fits, data_key: str, la: float, lb: floa
 @st.cache_data(show_spinner=False)
 def movie_gif(_data: SpectraSet, _track, data_key: str, track_label: str, every: int, fps: int,
               prominence: float, distance: int, smooth_window: int, cond_name: str, cond_unit: str,
-              delta: bool = False, follow_nm: float | None = None, trail: int = 8, mark_fringe: bool = True) -> bytes:
+              delta: bool = False, follow_nm: float | None = None, trail: int = 8, mark_fringe: bool = True,
+              smooth_display: bool = False, width_fit: bool = False) -> bytes:
     with tempfile.TemporaryDirectory() as tmp:
         out = render_movie(_data, Path(tmp) / "movie.gif", track=_track, track_label=track_label,
                            every=every, fps=fps, prominence=prominence, distance=distance,
                            smooth_window=smooth_window, cond_name=cond_name, cond_unit=cond_unit, dpi=80,
-                           delta=delta, follow_nm=follow_nm, trail=trail, mark_fringe=mark_fringe)
+                           delta=delta, follow_nm=follow_nm, trail=trail, mark_fringe=mark_fringe,
+                           smooth_display=smooth_display, width_fit=width_fit)
         return out.read_bytes()
 
 
@@ -1144,14 +1182,18 @@ if len(tracked):
     def _step_score(k):
         w = tracks[k]["wavelength"].to_numpy()
         return float(np.nanmax(w) - np.nanmin(w)) / max(robust_jitter(w), 1e-4)
-    step_ref = max(tracked["fringe"], key=_step_score)
+    stable_pool = tracked[tracked["stable"]]["fringe"] if tracked["stable"].any() else tracked["fringe"]
+    step_ref = max(stable_pool, key=_step_score)
     plateaus = _plateaus_of(step_ref)
 
 
 def _apply_step_condition(cond: np.ndarray):
     """Swap the condition column of the data and of every track for the step values."""
     global data, tracks, table, tracked, has_cond
-    data = replace(data, temperature=cond)
+    # The tracks carry the step values with the settle rows blanked (what the fits use); the data
+    # carries them filled across those rows, so readouts, maps and movie frames never show "nan".
+    filled = pd.Series(cond).ffill().bfill().to_numpy(float)
+    data = replace(data, temperature=filled)
     tracks = {k: tr.assign(temperature=cond) for k, tr in tracks.items()}
     has_cond = True
     table = fringe_table(tracks, has_cond)
@@ -1164,17 +1206,20 @@ if mode_key not in st.session_state:
     # First time this file is seen: a stepped run with only a drifting temperature column starts
     # on the load-step condition (set before the widget exists, as with the tracker choice).
     st.session_state[mode_key] = COND_MODES[1] if plateaus is not None else COND_MODES[0]
+if plateaus is None:
+    st.session_state[mode_key] = COND_MODES[0]       # the step option does not apply to this run
 with st.sidebar.expander("4 · Condition", expanded=True):
     cond_mode = st.radio(
-        "What the wavelength is calibrated against", COND_MODES, key=mode_key,
+        "What the wavelength is calibrated against", COND_MODES, key=mode_key, disabled=plateaus is None,
         help="Column in the file: the temperature/strain column found in the file (name it under "
              "*Condition and columns* if it was missed). Load steps: a staircase run — weights put on "
              "and taken off — where the file has no load column; enter one value per plateau in the "
              "table above the tabs.")
     if plateaus is not None:
         st.caption(f"{len(plateaus)} plateaus found on {step_ref} — this looks like a load-step run.")
-    elif cond_mode == COND_MODES[1]:
-        st.warning("No clear steps found on any tracked fringe; the file's column is used instead.")
+    else:
+        st.caption("No load steps in this run (the condition changes continuously), so the file's "
+                   "column is used.")
 use_steps = cond_mode == COND_MODES[1] and plateaus is not None
 
 header_slot = st.container()     # the header is drawn below, after the step editor has had its say
@@ -1228,6 +1273,13 @@ if plateaus is not None:
                        "the experiment; blank = leave that plateau out. *shift* is the plateau's mean "
                        f"wavelength of {step_ref} minus the first plateau's.")
         step_values = pd.to_numeric(edited["value"], errors="coerce").to_numpy(float)
+else:
+    with st.expander("Load steps — none found in this run", expanded=False, icon=":material/stairs:"):
+        st.markdown("The tracked wavelengths change continuously, without plateaus separated by jumps, "
+                    "so there is nothing to enter by hand here: the condition is the column found in "
+                    "the file. For a load experiment (weights put on and taken off) this box turns into "
+                    "a table with one row per plateau.")
+if plateaus is not None:
     if use_steps:
         cond_source = "steps"
         cond_name, cond_unit = step_name, step_unit
@@ -1250,23 +1302,28 @@ stat_strip([
     ("Wavelength (nm)", f"{data.wavelengths.min():.0f}–{data.wavelengths.max():.0f}",
      f"{len(data.wavelengths)} points · {np.median(np.diff(data.wavelengths)):.3g} nm step"),
     ("Duration", f"{(data.time.max() - data.time.min()) / 60:.0f} min", ""),
-    (cond_name, (f"{_cond_ends[0]:.1f} → {_cond_ends[-1]:.1f} {cond_unit}" if has_cond else "not in file"),
-     f"{np.nanmin(data.temperature):.1f}–{np.nanmax(data.temperature):.1f} {cond_unit}" if has_cond else ""),
-    ("Fringes tracked", f"{len(tracked)} / {len(table)}", f"locked ≥ {min_lock} % of spectra"),
+    (cond_name,
+     (f"{int(classify_plateaus(plateaus).sum())} load steps" if cond_source == "steps"
+      else f"{_cond_ends[0]:.1f} → {_cond_ends[-1]:.1f} {cond_unit}" if has_cond else "not in file"),
+     f"{np.nanmin(data.temperature):g}–{np.nanmax(data.temperature):g} {cond_unit}" if has_cond else ""),
+    ("Fringes tracked", f"{len(tracked)} / {len(table)}",
+     f"locked ≥ {min_lock} % of spectra" + (f" · {int((~table['stable']).sum())} flickering" if (~table["stable"]).any() else "")),
 ])
-if cond_source == "steps":
-    st.caption(f"Condition = {cond_name} entered per load step (*Load steps* below, chosen under "
-               f"*4 · Condition*); the file's own column is not used.")
+_flick = list(table.loc[~table["stable"], "fringe"])
+st.caption(
+    f"Tracking: **{track_mode}**, jump guard {'on' if max_step is not None else 'off'}"
+    + (" (chosen automatically for this file)" if st.session_state.get("auto_switched") and width_aware else "")
+    + f" · Condition: **{cond_name}** "
+    + ("entered per load step (*Load steps* below, *4 · Condition* in the sidebar)" if cond_source == "steps"
+       else "from the file" if has_cond else "none")
+    + (f" · Flickering fringe{'s' if len(_flick) > 1 else ''} (flat top, jumps between samples): "
+       f"{', '.join(_flick)} — tracked, but left out of the defaults and hidden in the shift plot." if _flick else ""))
 header_slot.__exit__(None, None, None)
 with st.expander("How the file was read · file format guide"):
     st.dataframe(read_report(full, cond_name, cond_unit), hide_index=True, width="stretch")
     st.markdown("If a column was taken for the wrong thing, name it under *Condition and columns* "
                 "in the sidebar (header name or 0-based column number).")
     format_guide(full if full.has_temperature else None, key="loaded")
-if st.session_state.get("auto_switched") and width_aware:
-    st.info("Tracking uses the **fringe-width fit** with the jump guard off: with the standard tracker "
-            "most fringes of this file lost lock (load steps or very wide fringes). "
-            "Change it under *3 · Fringe tracking* in the sidebar.", icon=":material/auto_fix_high:")
 if poor_lock:
     with st.container(border=True):
         st.markdown(
@@ -1345,17 +1402,22 @@ with tab_track:
     if table.empty:
         st.info("No peaks or dips were found in the first spectrum. Lower the prominence in the sidebar.")
     else:
-        x_mode = st.radio("Horizontal axis", ["Time"] + (["Condition"] if has_cond else []),
-                          format_func=y_label, horizontal=True, key="shift_x")
-        st.plotly_chart(shifts_figure({k: tracks[k] for k in tracked["fringe"]}, x_mode, cond_title),
+        hc = st.columns([1.2, 1.4, 2])
+        x_mode = hc[0].radio("Horizontal axis", ["Time"] + (["Condition"] if has_cond else []),
+                             format_func=y_label, horizontal=True, key="shift_x")
+        n_flick = int((~tracked["stable"]).sum())
+        hide_flick = hc[1].checkbox(f"Hide flickering fringes ({n_flick})", value=True, key="hide_flicker",
+                                    disabled=n_flick == 0,
+                                    help="A fringe whose position reverses by more than 0.2 nm on more than "
+                                         "5 % of its frames: its top is flat and two samples compete for the "
+                                         "extremum. It stays in the tables; this only hides it in the plot.")
+        shown_tr = tracked[tracked["stable"]] if (hide_flick and n_flick) else tracked
+        st.plotly_chart(shifts_figure({k: tracks[k] for k in shown_tr["fringe"]}, x_mode, cond_title),
                         width="stretch")
         st.caption("Each line is one fringe from the first spectrum, shown as its shift from where it started.")
 
         st.subheader("Fringes in detail")
-        ranked = tracked.dropna(subset=["sensitivity_pm"])
-        ranked = ranked[ranked["r_squared"] >= 0.9]
-        default = (ranked.loc[ranked["sensitivity_pm"].abs().idxmax(), "fringe"] if len(ranked)
-                   else (tracked["fringe"].iloc[0] if len(tracked) else table["fringe"].iloc[0]))
+        default = pick_default(table, tracked, has_cond)
         labels = list(table["fringe"])
         lock_of = table.set_index("fringe")["locked_pct"]
         fmt = lambda k: f"{k} nm · locked {lock_of[k]:.0f}%"  # noqa: E731
@@ -1447,8 +1509,9 @@ with tab_sens:
                    f"{t_lo:.1f} and {t_hi:.1f} {cond_unit}. A clearly lower quadratic RMSE means the "
                    f"sensitivity changed along the run (fringes close to the critical wavelength).")
     st.dataframe(
-        shown.rename(columns={"sensitivity_pm": f"sensitivity (pm/{cond_unit})",
+        shown.drop(columns=["stable"]).rename(columns={"sensitivity_pm": f"sensitivity (pm/{cond_unit})",
                               "stderr_pm": f"± (pm/{cond_unit})", "locked_pct": "locked (%)",
+                              "flicker_pct": "flicker (%)",
                               "start_nm": "start (nm)", "end_nm": "end (nm)", "shift_nm": "shift (nm)",
                               "r_squared": "R²", "rmse_linear_pm": "RMSE linear (pm)",
                               "rmse_quadratic_pm": "RMSE quadratic (pm)",
@@ -1459,6 +1522,8 @@ with tab_sens:
                        "end (nm)": st.column_config.NumberColumn(format="%.2f"),
                        "shift (nm)": st.column_config.NumberColumn(format="%+.3f"),
                        "locked (%)": st.column_config.NumberColumn(format="%.0f"),
+                       "flicker (%)": st.column_config.NumberColumn(format="%.1f",
+                                                                   help="Frames with a reversal > 0.2 nm; > 5 % = flickering"),
                        f"sensitivity (pm/{cond_unit})": st.column_config.NumberColumn(format="%+.1f"),
                        f"± (pm/{cond_unit})": st.column_config.NumberColumn(format="%.1f"),
                        "R²": st.column_config.NumberColumn(format="%.4f"),
@@ -1618,9 +1683,7 @@ with tab_movie:
         c = st.columns([1.3, 1, 1, 1.2])
         labels = list(table["fringe"])
         if labels:
-            ranked = tracked.dropna(subset=["sensitivity_pm"]) if has_cond else tracked
-            default_m = (ranked.loc[ranked["sensitivity_pm"].abs().idxmax(), "fringe"]
-                         if has_cond and len(ranked) else (tracked["fringe"].iloc[0] if len(tracked) else labels[0]))
+            default_m = pick_default(table, tracked, has_cond)
             movie_label = c[0].selectbox("Fringe to follow", labels, index=labels.index(default_m), key="movie_fringe",
                                          help="Marked on the spectrum, used by the camera and by the lower-right panel.")
             movie_track = tracks[movie_label]
@@ -1644,15 +1707,25 @@ with tab_movie:
                                   help="Past peak/dip positions fade out behind the current ones.")
             mark_m = o[3].checkbox("Mark the followed fringe", True, key="movie_mark")
             big_m = o[3].checkbox(f"Big {cond_name.lower()} readout", True, key="movie_big", disabled=not has_cond)
+            noisy = spectral_noise(data) > 0.004       # keys carry data_key: defaults are per file
+            smooth_m = o[0].checkbox("Draw the smoothed spectrum", value=noisy, key=f"movie_smooth_{data_key}",
+                                     help="Display only: the Savitzky–Golay curve the detector works on, "
+                                          "instead of the raw samples. On by default for noisy runs.")
+            fit_m = o[1].checkbox("Width-fit the peaks and dips", value=width_aware, key=f"movie_fit_{data_key}",
+                                  help="Position each marker with the fringe-width fit (a parabola over half "
+                                       "the fringe) instead of three samples, as the tracker does in that mode.")
         follow_nm_m = follow_m if (camera == "Follow the fringe" and movie_track is not None) else None
+        disp_m = smooth(data.spectra, smooth_window) if smooth_m else None
 
         rows_m = tuple(int(r) for r in frame_rows(len(data), every_m, MOVIE_MAX_FRAMES))
         if build_movie:
-            ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window)
-            all_m = {k: tracks[k] for k in tracked["fringe"]} if panel_m == "All fringes" else None
+            ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window, fit_m)
+            all_m = ({k: tracks[k] for k in tracked[tracked["stable"]]["fringe"]}
+                     if panel_m == "All fringes" else None)
             st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m,
                                          mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,
-                                         panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond),
+                                         panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond,
+                                         spectra_disp=disp_m),
                             width="stretch")
             st.caption(f"{len(rows_m)} frames. Press ▶ Play, or drag the slider (time in minutes). "
                        "Peaks and dips are detected with the sidebar settings on every frame; grey markers are "
@@ -1666,7 +1739,7 @@ with tab_movie:
                     gif = movie_gif(data, movie_track, data_key, movie_label, every_m, fps_m,
                                     prominence, distance, smooth_window, cond_name, cond_unit,
                                     delta=(mode_m == "Change from first spectrum"), follow_nm=follow_nm_m,
-                                    trail=trail_m, mark_fringe=mark_m)
+                                    trail=trail_m, mark_fringe=mark_m, smooth_display=smooth_m, width_fit=fit_m)
                 st.session_state["movie_gif"] = (gif, f"{Path(file_name).stem}_movie.gif")
                 st.caption(f"{len(gif) / 1e6:.1f} MB in {_time.time() - t0:.0f} s")
             if "movie_gif" in st.session_state:

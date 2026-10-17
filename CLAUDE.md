@@ -154,6 +154,20 @@ It is a continuous cooldown — no setpoint steps.
   the sidebar radio "4 · Condition" (`cond_mode_<data_key>`: "Column in the file" / "Load steps (by
   hand)", defaulting to steps when plateaus were found — the owner wanted both options visible for
   every file, 2026-10-17); `_apply_step_condition` swaps `data.temperature` and every track's `temperature` column.
+  Review pass 2026-10-17 (owner: "still noisy, the video too, and the two examples' interfaces
+  differ"): `tracking.flicker_fraction` (% of frames with a > 0.2 nm reversal; > `FLICKER_LIMIT_PCT`
+  = 5 → `table["stable"] == False`; only peak@1529.8 on the strain run, none on the cooldown — a
+  plain jump count flagged peak@1534.6 on the cooldown, which moves 0.3 nm/frame in one direction),
+  `pick_default` (most sensitive *stable* fringe) for the detail/movie defaults and the step
+  reference, `hide_flicker` checkbox on the shift plot, "flicker (%)" column, status caption under
+  the tiles for every file (tracking mode, condition source, flickering fringes), the Load-steps
+  expander and the "4 · Condition" radio exist for every file (disabled + one line when no
+  plateaus), the condition tile shows "N load steps" for the step condition.
+  `tracking.refine_width_fit` re-positions a detected ExtremaSet with `fit_vertex` (movie markers);
+  `movie_extrema(width_fit=)`, `movie_figure(spectra_disp=)`, `render_movie(smooth_display=,
+  width_fit=)`; checkboxes `movie_smooth_<key>` (default `spectral_noise(data) > 0.004`: 0.0013 on
+  the cooldown, 0.0081 on the strain run) and `movie_fit_<key>` (default = width_aware) — keys carry
+  data_key because a keyed widget keeps its state across a file switch.
   "Fringes in detail" = radio `detail_mode` ("One fringe (Igor style)" → `selectbox` key
   `detail_fringe`, `igor_figure` + `calibration_figure`; "Several fringes" →
   `st.multiselect(key="detail_fringes", max_selections=10)`) →

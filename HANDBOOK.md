@@ -170,6 +170,10 @@ GitHub's free monthly allowance is limited.
   *Column in the file* switches back to the file's own temperature/strain column.
 - **One or several fringes:** on the Fringe tracking tab, *Fringes in detail* shows
   one fringe Igor-style or up to 10 fringes together.
+- **A fringe that flickers** (jumps back and forth between two samples because its
+  top is flat) is flagged under the tiles and hidden in the shift plot; untick
+  *Hide flickering fringes* to see it. For noisy spectra the movie draws the
+  smoothed curve and width-fits the markers (*Movie options*).
   An uploaded file is processed by the computer that runs the app; with 4b or 4c
   that is a cloud server.
 - **As the default example:** replace `data/data.csv` with your file.

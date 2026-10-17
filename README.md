@@ -123,6 +123,18 @@ so the sensitivity comes out per gram — Igor's *shift vs mass*. On the strain
 file (assuming 50 g steps): dip@1552.8 +11.8 pm/g, dip@1491.1 −18.4 pm/g,
 R² ≈ 0.99; the unloaded level drifts +0.22 nm over the run with the temperature.
 
+**Flickering fringes.** A fringe whose top is so flat that two samples compete
+for the extremum (the peak at λc on the strain run) zig-zags by a nanometre
+between frames. `flicker (%)` in the fringe table counts the frames on which the
+position reverses by more than 0.2 nm; above 5 % the fringe is flagged: still
+tracked and listed, but hidden in the shift plot (checkbox) and never a default.
+On the strain run that is `peak@1529.8` alone; on the cooldown none.
+
+**Movie on noisy data.** Under *Movie options*, *Draw the smoothed spectrum*
+(display only, on by default when the spectra are noisy) and *Width-fit the
+peaks and dips* (the tracker's parabola fit, on when the tracker uses it) keep
+the frames from jittering; both also apply to the GIF.
+
 **One or several fringes.** *Fringes in detail* on the Fringe tracking tab shows
 one fringe Igor-style (wavelength and condition against time, calibration with
 residuals) or up to 10 fringes: their shifts against time with the condition on the right axis,

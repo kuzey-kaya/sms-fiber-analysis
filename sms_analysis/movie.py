@@ -19,7 +19,8 @@ import pandas as pd
 
 from .igor_style import IGOR_BLUE, IGOR_RED
 from .io import SpectraSet
-from .peaks import detect_extrema
+from .peaks import detect_extrema, smooth
+from .tracking import refine_width_fit
 from .plotting import COLOR_TEMPERATURE, COLOR_WAVELENGTH
 
 
@@ -51,8 +52,14 @@ def render_movie(
     follow_nm: float | None = None,
     trail: int = 8,
     mark_fringe: bool = True,
+    smooth_display: bool = False,
+    width_fit: bool = False,
 ) -> Path:
     """Write the animation to ``out`` (.mp4 with ffmpeg, otherwise .gif).
+
+    ``smooth_display`` draws the Savitzky–Golay-smoothed spectra (detection is
+    unchanged); ``width_fit`` positions the drawn extrema with the fringe-width
+    fit (:func:`~sms_analysis.tracking.refine_width_fit`) — both for noisy runs.
 
     ``track`` (output of ``track_feature``) adds the lower-right panel: the
     tracked wavelength and the condition drawn up to the current frame, in the
@@ -76,18 +83,20 @@ def render_movie(
     ax_trk = fig.add_subplot(gs[1, 1])
 
     # --- spectrum panel ---------------------------------------------------
-    s0 = data.spectra[0]
+    smoothed = smooth(data.spectra, smooth_window)
+    disp = smoothed if smooth_display else data.spectra      # what is drawn; detection uses the raw data
+    s0 = disp[0]
 
     def spec_y(r):
-        return data.spectra[r] - s0 if delta else data.spectra[r]
+        return disp[r] - s0 if delta else disp[r]
 
     def ext_of(r):
         ext = detect_extrema(wl, data.spectra[r], prominence=prominence, distance=distance,
-                             smooth_window=smooth_window)
-        pw, pv, dw, dv = ext.peak_wavelengths, ext.peak_values, ext.dip_wavelengths, ext.dip_values
-        if delta:
-            d = data.spectra[r] - s0
-            pv, dv = np.interp(pw, wl, d), np.interp(dw, wl, d)
+                             smooth_window=smooth_window, smoothed=smoothed[r])
+        if width_fit:
+            ext = refine_width_fit(wl, data.spectra[r], ext)
+        pw, dw = ext.peak_wavelengths, ext.dip_wavelengths
+        pv, dv = np.interp(pw, wl, spec_y(r)), np.interp(dw, wl, spec_y(r))
         return pw, pv, dw, dv
 
     ext_cache: dict[int, tuple] = {}
