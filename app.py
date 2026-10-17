@@ -1217,6 +1217,7 @@ def display_tracks(tracks: dict, method: str, plateaus) -> dict:
 # --------------------------------------------------------------------------
 cond_source = "file"
 plateaus, step_values, step_ref = None, None, None
+step_cond = None        # the step condition with the settle rows blanked (what every fit should use)
 
 
 def _plateaus_of(label: str):
@@ -1238,9 +1239,10 @@ if len(tracked):
 
 def _apply_step_condition(cond: np.ndarray):
     """Swap the condition column of the data and of every track for the step values."""
-    global data, tracks, table, tracked, has_cond
+    global data, tracks, table, tracked, has_cond, step_cond
     # The tracks carry the step values with the settle rows blanked (what the fits use); the data
     # carries them filled across those rows, so readouts, maps and movie frames never show "nan".
+    step_cond = cond
     filled = pd.Series(cond).ffill().bfill().to_numpy(float)
     data = replace(data, temperature=filled)
     tracks = {k: tr.assign(temperature=cond) for k, tr in tracks.items()}
@@ -1611,6 +1613,10 @@ with tab_phase:
         c[2].caption("Defaults are the pair used in the paper (1545 and 1570 nm). The pair scan below "
                      "shows which pair responds most to this run's condition.")
         ser = phase_series(data, la, lb, fits=fits_p)
+        if step_cond is not None:
+            # pair the readout with the blanked step condition: the frames recorded while the load was
+            # being changed must not enter the fit or the scatter (they would sit at the previous load)
+            ser = ser.assign(temperature=step_cond)
         n_fit = int(ser["phase_diff"].notna().sum())
         sens_p = None
         if has_cond and n_fit >= 3:
@@ -1640,7 +1646,7 @@ with tab_phase:
         if has_cond:
             with st.expander("Which wavelength pair works best for this run? · what the readout sees"):
                 grid = np.arange(np.ceil(wl_min / 5) * 5 + 5, wl_max - 4, 5.0)
-                scan = scan_pairs(fits_p, data.temperature, grid)
+                scan = scan_pairs(fits_p, step_cond if step_cond is not None else data.temperature, grid)
                 if len(scan):
                     st.dataframe(scan.sort_values("resolution").head(10).rename(columns={
                         "lambda_a": "a (nm)", "lambda_b": "b (nm)", "slope": f"rad/{cond_unit}",
