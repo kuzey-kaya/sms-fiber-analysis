@@ -25,12 +25,14 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sms_analysis import (  # noqa: E402
     curvature_test,
+    detect_extrema,
     fit_sensitivity,
     load_sms_csv,
     sensitivity_map,
@@ -81,7 +83,14 @@ def main() -> None:
                    help="wavelength (nm) of the feature to track in detail; "
                         "default: the most sensitive reliably-tracked fringe")
     p.add_argument("--track-kind", choices=["peak", "dip"], default="dip")
+    p.add_argument("--width-fit", action="store_true",
+                   help="size the search window (0.7) and a parabola fit (0.5) to each fringe's own "
+                        "half period: for wide/noisy fringes and step changes (strain/load runs)")
+    p.add_argument("--no-jump-guard", action="store_true",
+                   help="do not treat jumps > 0.5 nm between spectra as lost lock "
+                        "(needed when the condition changes in steps)")
     args = p.parse_args()
+    max_step = None if args.no_jump_guard else 0.5
 
     if not Path(args.csv).exists():
         sys.exit(f"CSV not found: {args.csv}\n"
@@ -113,7 +122,8 @@ def main() -> None:
 
     # --- Track every fringe ---------------------------------------------------
     tracks = track_all_extrema(data, prominence=args.prominence,
-                               distance=args.distance, search_window=args.search_window)
+                               distance=args.distance, search_window=args.search_window,
+                               max_step=max_step, width_aware=args.width_fit)
     export_all_tracks(data, tracks, outdir)
 
     good = None
@@ -140,8 +150,17 @@ def main() -> None:
 
     # --- One feature in detail -----------------------------------------------
     if args.track is not None:
-        track = track_feature(data, start_wavelength=args.track,
-                              kind=args.track_kind, search_window=args.search_window)
+        window, fit_width = args.search_window, None
+        if args.width_fit:
+            first = detect_extrema(data.wavelengths, data.spectra[0],
+                                   prominence=args.prominence, distance=args.distance)
+            # half period = distance to the nearest *other* extremum of the first spectrum
+            dist = np.sort(np.abs(np.r_[first.peak_wavelengths, first.dip_wavelengths] - args.track))
+            h = (dist[1] if dist[0] < 1.0 else dist[0]) if dist.size > 1 else np.inf
+            if np.isfinite(h):
+                window, fit_width = max(window, 0.7 * h), 0.5 * h
+        track = track_feature(data, start_wavelength=args.track, kind=args.track_kind,
+                              search_window=window, max_step=max_step, fit_width=fit_width)
         kind = args.track_kind
         label = f"{kind}@{args.track:.1f}"
     elif has_temp and good is not None and len(good):

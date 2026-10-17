@@ -247,11 +247,12 @@ def load_data(file_bytes: bytes | None, suffix: str, cond_col, time_col,
 
 @st.cache_data(show_spinner="Tracking every fringe…")
 def track_all(_data: SpectraSet, data_key: str, prominence: float, distance: int,
-              search_window: float, smooth_window: int, max_step: float | None):
+              search_window: float, smooth_window: int, max_step: float | None,
+              width_aware: bool = False):
     # _data is not hashed by Streamlit; data_key identifies it instead.
     return track_all_extrema(_data, prominence=prominence, distance=distance,
                              search_window=search_window, smooth_window=smooth_window,
-                             max_step=max_step)
+                             max_step=max_step, width_aware=width_aware)
 
 
 @st.cache_data(show_spinner="Fitting the phase profile of every spectrum…")
@@ -1001,11 +1002,25 @@ with st.sidebar.expander("2 · Peak detection", expanded=False):
     smooth_window = st.slider("Smoothing window (samples)", 5, 51, 11, step=2,
                               help="Savitzky–Golay window applied before detection.")
 
+TRACK_MODES = ["Standard", "Fringe-width fit"]
+# Defaults through session state (not widget arguments): the advisory button below sets these keys.
+st.session_state.setdefault("track_mode", TRACK_MODES[0])
+st.session_state.setdefault("reject_jumps", True)
 with st.sidebar.expander("3 · Fringe tracking", expanded=False):
+    track_mode = st.radio(
+        "Fringe position", TRACK_MODES, key="track_mode", horizontal=True,
+        help="Standard: 3-point parabola on the smoothed curve, fixed search window (the published "
+             "analysis). Fringe-width fit: each fringe gets a search window of 0.7 and a parabola fit "
+             "over 0.5 of its own half period, so wide or noisy fringes stop jittering and sudden "
+             "multi-nm shifts (load on/off) are followed. Use it for strain/load step runs.")
+    width_aware = track_mode == TRACK_MODES[1]
     search_window = st.slider(
-        "Search half-window (nm)", 0.1, 10.0, 1.5, 0.1,
-        help="How far from its last position a fringe is searched. Keep below the fringe spacing.")
-    reject = st.checkbox("Reject jumps (fringe-hop guard)", True)
+        "Search half-window (nm)" + (" — minimum" if width_aware else ""), 0.1, 10.0, 1.5, 0.1,
+        help="How far from its last position a fringe is searched. Keep below the fringe spacing. "
+             "With the fringe-width fit each fringe uses the larger of this and 0.7 × its half period.")
+    reject = st.checkbox("Reject jumps (fringe-hop guard)", key="reject_jumps",
+                         help="Treat a jump larger than the limit as a lost lock. Right for slow drifts "
+                              "(temperature); turn it off when the condition changes in steps.")
     max_step = st.slider("Largest allowed jump per spectrum (nm)", 0.05, 5.0, 0.5, 0.05,
                          disabled=not reject) if reject else None
     min_lock = st.slider("Count a fringe as tracked when locked ≥ (%)", 10, 100, 90, 5)
@@ -1013,9 +1028,19 @@ st.sidebar.caption("Defaults are the values used for the published analysis; ope
 
 data_key = hashlib.md5(
     (file_bytes or example_stamp.encode()) + repr((cond_col_txt, time_col_txt, wl_range)).encode()).hexdigest()
-tracks = track_all(data, data_key, prominence, distance, search_window, smooth_window, max_step)
+tracks = track_all(data, data_key, prominence, distance, search_window, smooth_window, max_step,
+                   width_aware)
 table = fringe_table(tracks, has_cond)
 tracked = table[table["locked_pct"] >= min_lock]
+
+
+def use_width_fit():
+    st.session_state["track_mode"] = TRACK_MODES[1]
+    st.session_state["reject_jumps"] = False
+
+
+poor_lock = (not width_aware and len(table) > 0
+             and (table["locked_pct"].mean() < 80 or len(tracked) < 0.5 * len(table)))
 
 # --------------------------------------------------------------------------
 # header
@@ -1040,6 +1065,16 @@ with st.expander("How the file was read · file format guide"):
     st.markdown("If a column was taken for the wrong thing, name it under *Condition and columns* "
                 "in the sidebar (header name or 0-based column number).")
     format_guide(full if full.has_temperature else None, key="loaded")
+if poor_lock:
+    with st.container(border=True):
+        st.markdown(
+            f"**Most fringes lose lock with the standard tracker** (mean lock "
+            f"{table['locked_pct'].mean():.0f} %, {len(tracked)} of {len(table)} fringes tracked). This "
+            "happens when fringes jump by more than the search window between spectra (load put on "
+            "or taken off) or are so wide that their top is flat and noisy. The fringe-width fit with "
+            "the jump guard off is made for that.")
+        st.button("Switch to the fringe-width fit", on_click=use_width_fit, type="primary",
+                  icon=":material/auto_fix_high:")
 if not has_cond:
     st.warning(f"No {cond_name.lower()} column was found, so calibration (sensitivity) is skipped. "
                "Maps, peaks and tracking still work. If the file has one, name it under "
@@ -1384,7 +1419,7 @@ with tab_export:
     settings = dict(file=file_name, layout=data.layout, condition=cond_name, unit=cond_unit,
                     wavelength_range_nm=list(wl_range), prominence=prominence, distance=distance,
                     smooth_window=smooth_window, search_window_nm=search_window,
-                    max_step_nm=max_step, min_lock_pct=min_lock)
+                    max_step_nm=max_step, min_lock_pct=min_lock, tracking=track_mode)
     stem = Path(file_name).stem
     c = st.columns(4)
     c[0].download_button("Tracked fringes (wide CSV)", wide.to_csv(index=False),

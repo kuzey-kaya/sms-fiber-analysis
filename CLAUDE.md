@@ -71,6 +71,15 @@ It is a continuous cooldown — no setpoint steps.
   it down — ~7 s instead of ~18 s, outputs byte-identical; takes `max_step`), `track_feature_legacy` (exact reproduction of the old Colab tracker:
   4 nm window, unguarded refine on raw data → fringe-hops; optional median filter),
   `track_band_extremum` (strongest extremum in a fixed band → staircase from identity hops).
+  `track_all_extrema(width_aware=True)` (2026-10-17, for the advisor's strain file
+  `sms-strain-2026-10-15-norm-fringelab.csv`, where FringeLab's tracking "looked very noisy"):
+  per fringe, h = half period in frame 0 (`half_periods`), search window max(search_window, 0.7 h),
+  position = `fit_vertex` (least-squares parabola on raw samples within 0.5 h, shrunk symmetrically
+  at the band edge) via `track_feature(fit_width=...)`; use with `max_step=None` for load steps.
+  Cause on that file: load on/off moves fringes 1–14 nm in one spectrum (> ±1.5 nm window and the
+  0.5 nm guard) and 20 nm wide fringes at 0.2 nm sampling jitter ≈ 50 pm; width fit → 20/20 locked,
+  ≈ 10 pm, plateaus ±10–40 pm. Default stays off (published numbers); on the cooldown it gives
+  −140.1 / +364.5 pm/°C. Tested in `tests/test_tracking.py` (SIMULATED steps + cooldown).
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,
@@ -129,7 +138,10 @@ It is a continuous cooldown — no setpoint steps.
   spectrum number / condition axis; transmittance, change from first spectrum, per-spectrum 0–1;
   tracked-fringe overlay), spectrum & peaks, fringe tracking (all shifts + one fringe Igor-style +
   calibration), sensitivity, 3-D surface, export (CSV/JSON). Uses only package functions; results
-  are cached per file + settings. "Tracked" in the app = locked ≥ 90 % of frames (21/24 on
+  are cached per file + settings. Sidebar "3 · Fringe tracking" has the `track_mode` radio
+  (Standard / Fringe-width fit) and the `reject_jumps` checkbox (defaults via session state); when
+  the standard tracker's mean lock < 80 % or < half the fringes are tracked, a box above the tabs
+  offers "Switch to the fringe-width fit" (sets both keys). `run_analysis.py --width-fit --no-jump-guard`. "Tracked" in the app = locked ≥ 90 % of frames (21/24 on
   data/data.csv; the scripts' 22/24 counts R² ≥ 0.90). 2026-10-06 additions: file-format guide
   (`FORMAT_RULES`, `template_csv`, `format_guide`: start page, load-error page and the
   "How the file was read" expander, with a template CSV cut from the example run), `read_report`
@@ -271,5 +283,10 @@ SM1E.2 (phase unwrapping, wide dynamic range); Chen 2025 Optica Sensing JM4A.8 (
 
 `python -m pytest` (checks the numbers above automatically) → `python3 scripts/inspect_csv.py` →
 the scripts with no arguments → `ls figures` shows fig1–fig23 and the CSVs.
-The strain CSV is still not on this machine (searched Downloads, OneDrive/Masaüstü/fiberoptic and
-all zip packages on 2026-10-08: every CSV there is the same 2024-10-17 cooldown run).
+A strain run arrived 2026-10-17: `~/Downloads/sms-strain-2026-10-15-norm-fringelab.csv` (not in the
+repo — data publication still undecided): 914 spectra, 1425–1625 nm at 0.2 nm, one every 3.6 s,
+55 min, columns temperature (21.7–22.7 °C, no load column) + time. Load is put on and taken off
+8 times (~3 min each, back to baseline between); with the width fit the dip at 1491.1 nm sits at
+−1.16, −2.10, −2.99, −3.84, −4.62, −5.37, −6.13, −8.28 nm on the loaded plateaus (dip@1552.8:
++0.72 … +5.26; the λc peak@1529.8: +2.4 … +14.0). Load values per step: ask the advisor. Phase
+readout on it: not run yet.

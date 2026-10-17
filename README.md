@@ -83,8 +83,25 @@ loaded file was interpreted.
 Sidebar settings: data source (the example run `data/data.csv` or an uploaded
 file), condition name/unit and column overrides (for runs where strain, load, …
 was varied instead of temperature), wavelength range, detection (prominence,
-separation, smoothing) and tracking (search window, jump rejection). The
-defaults are the values used by the scripts below.
+separation, smoothing) and tracking (fringe position: *Standard* or
+*Fringe-width fit*, search window, jump rejection). The defaults are the values
+used by the scripts below.
+
+**Strain / load runs, wide fringes.** The standard tracker (±1.5 nm window,
+jumps > 0.5 nm = lost lock) is built for slow drifts like the cooldown. In a run
+where a load is put on and taken off, the fringes move several nm within one
+spectrum (up to 8 nm for the dip at 1491 nm and 14 nm at λc in the 2026-10-15
+strain file), so it loses them, and its broken pieces look like noise. On
+fringes 10–20 nm wide sampled every 0.2 nm the flat top also makes the
+3-point position jitter (≈ 50 pm). *Fringe-width fit* sizes each fringe's search
+window (0.7) and a least-squares parabola over the raw samples (0.5) to its own
+half period, and the jump guard is switched off; the app offers this switch
+itself when most fringes lose lock. On the strain file: 20/20 fringes locked
+(was 1/20), jitter ≈ 10 pm (was 53 pm), and every load step comes out as a
+clean plateau (±10–40 pm). On the cooldown run it gives −140.1 / +364.5 pm/°C
+for the two headline fringes (standard: −141.3 / +359.3, which stay the quoted
+numbers). Calibration against the condition still needs the load in the file:
+the strain file's only condition column is temperature (21.7–22.7 °C).
 
 ## Install & run (scripts)
 
@@ -105,6 +122,8 @@ Useful options:
 --track-kind dip      'dip' (minimum) or 'peak' (maximum)
 --prominence 0.02     peak-detection prominence (transmittance units)
 --search-window 1.5   tracking half-window in nm
+--width-fit           fringe-width fit (see above): wide/noisy fringes, strain/load steps
+--no-jump-guard       keep jumps > 0.5 nm between spectra (needed for step changes)
 ```
 
 With no `--track`, the script tracks *every* fringe, builds the sensitivity

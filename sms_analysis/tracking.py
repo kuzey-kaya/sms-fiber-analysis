@@ -23,6 +23,7 @@ def track_feature(
     smooth_window: int = 11,
     max_step: float | None = 0.5,
     smoothed: np.ndarray | None = None,
+    fit_width: float | None = None,
 ) -> pd.DataFrame:
     """Track a single peak or dip through all spectra.
 
@@ -84,9 +85,15 @@ def track_feature(
             continue
 
         idx = in_window[local]
-        # Refine on the smoothed curve: sub-sample precision without letting
-        # single noisy samples throw the vertex off.
-        w, v = parabolic_refine(wl, y_s, idx)
+        if fit_width is not None:
+            w, v = fit_vertex(wl, y_raw, float(wl[idx]), fit_width, kind)
+            if not np.isfinite(w):
+                records.append((data.time[i], data.temperature[i], np.nan, np.nan))
+                continue
+        else:
+            # Refine on the smoothed curve: sub-sample precision without letting
+            # single noisy samples throw the vertex off.
+            w, v = parabolic_refine(wl, y_s, idx)
 
         if max_step is not None and abs(w - last) > max_step:
             records.append((data.time[i], data.temperature[i], np.nan, np.nan))
@@ -98,6 +105,47 @@ def track_feature(
     return pd.DataFrame(records, columns=["time", "temperature", "wavelength", "value"])
 
 
+def fit_vertex(wl: np.ndarray, y: np.ndarray, center: float, half_width: float,
+               kind: str) -> tuple[float, float]:
+    """Vertex of a least-squares parabola through the samples within ``half_width`` of ``center``.
+
+    Near the end of the band the range shrinks symmetrically (a one-sided fit
+    would be biased); returns ``(nan, nan)`` when that leaves less than half
+    of ``half_width``, fewer than 5 samples fall in the range, the parabola
+    opens the wrong way for ``kind``, or its vertex lies outside the fitted
+    range (no real extremum there).
+    """
+    room = min(half_width, center - wl.min(), wl.max() - center)
+    if room < 0.5 * half_width:
+        return np.nan, np.nan
+    half_width = room
+    m = np.abs(wl - center) <= half_width
+    if m.sum() < 5:
+        return np.nan, np.nan
+    x = wl[m] - center
+    a, b, c = np.polyfit(x, y[m], 2)
+    if (kind == "dip" and a <= 0) or (kind == "peak" and a >= 0):
+        return np.nan, np.nan
+    off = -b / (2.0 * a)
+    if abs(off) > half_width:
+        return np.nan, np.nan
+    return float(center + off), float(c - b * b / (4.0 * a))
+
+
+def half_periods(positions: np.ndarray) -> np.ndarray:
+    """Distance from each extremum to its nearest neighbouring extremum (nm), i.e. the local half period."""
+    pos = np.asarray(positions, float)
+    order = np.argsort(pos)
+    s = pos[order]
+    gaps = np.diff(s)
+    left = np.r_[np.inf, gaps]
+    right = np.r_[gaps, np.inf]
+    near = np.minimum(left, right)
+    out = np.empty_like(near)
+    out[order] = near
+    return out
+
+
 def track_all_extrema(
     data: SpectraSet,
     prominence: float = 0.02,
@@ -105,6 +153,9 @@ def track_all_extrema(
     search_window: float = 1.5,
     smooth_window: int = 11,
     max_step: float | None = 0.5,
+    width_aware: bool = False,
+    window_fraction: float = 0.7,
+    fit_fraction: float = 0.5,
 ) -> dict[str, pd.DataFrame]:
     """Track every extremum found in the first spectrum.
 
@@ -115,6 +166,18 @@ def track_all_extrema(
     edges, and the two sides of the critical wavelength can move in opposite
     directions -- which is why peak motion looks "irregular" if features are
     not tracked individually.
+
+    ``width_aware=True`` sizes the tracker to each fringe: with h its local
+    half period in the first spectrum (distance to the nearest extremum),
+    the search window becomes ``max(search_window, window_fraction * h)`` and
+    the position is a parabola fit over ``fit_fraction * h`` of raw data
+    (``fit_width`` of :func:`track_feature`).  For fringes 10-20 nm wide or
+    noisy spectra this cuts the frame-to-frame jitter several-fold, and the
+    wider window follows sudden multi-nm shifts (load put on or taken off);
+    it stays below one half period, while the next fringe of the same kind
+    is a full period away, so it cannot hop to it.  Combine with
+    ``max_step=None`` when the condition changes in steps.  The default
+    (``False``) is the tracker behind the published cooldown numbers.
     """
     first = detect_extrema(
         data.wavelengths, data.spectra[0], prominence=prominence,
@@ -122,14 +185,22 @@ def track_all_extrema(
     )
     # Smooth every spectrum once; each fringe's tracker reuses the result.
     smoothed = np.array([smooth(y, smooth_window) for y in data.spectra])
+    all_pos = np.r_[first.peak_wavelengths, first.dip_wavelengths]
+    halves = half_periods(all_pos) if all_pos.size > 1 else np.full(all_pos.size, np.inf)
+    half_of = dict(zip(all_pos.tolist(), halves.tolist()))
     tracks: dict[str, pd.DataFrame] = {}
     for kind, wls in (("peak", first.peak_wavelengths), ("dip", first.dip_wavelengths)):
         for w in wls:
             label = f"{kind}@{w:.1f}"
+            window, fit_width = search_window, None
+            h = half_of[float(w)]
+            if width_aware and np.isfinite(h):
+                window = max(search_window, window_fraction * h)
+                fit_width = fit_fraction * h
             tracks[label] = track_feature(
                 data, start_wavelength=float(w), kind=kind,
-                search_window=search_window, smooth_window=smooth_window,
-                max_step=max_step, smoothed=smoothed,
+                search_window=window, smooth_window=smooth_window,
+                max_step=max_step, smoothed=smoothed, fit_width=fit_width,
             )
     return tracks
 
