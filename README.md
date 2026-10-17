@@ -85,8 +85,8 @@ loaded file was interpreted.
 | Movie | two movies, chosen at the top of the tab and built when *Build the animation* is turned on (a few seconds). *Spectra and fringes*: the run frame by frame (spectrum + extrema with fading trails, big temperature readout, map cursor, one fringe or all fringes in the lower-right panel) with Δ view and a camera that follows a fringe. *Phase readout (SM1E.2)*: numbered extrema, the cubic Δφ(λ) and λc moving, the readout growing (pair taken from the Phase tab). Both with play/pause, a time slider and GIF export for slides |
 | Export | tracked fringes (wide/long CSV), fringe table, the settings used |
 
-Sidebar settings: data source (the two example runs — the cooldown `data/data.csv`
-and the load-step run `data/strain.csv` — or an uploaded file), condition name/unit and column overrides (for runs where strain, load, …
+Sidebar settings: data source (the example cooldown `data/data.csv` or an uploaded
+file) and the **Load-step run** checkbox, condition name/unit and column overrides (for runs where strain, load, …
 was varied instead of temperature), wavelength range, detection (prominence,
 separation, smoothing) and tracking (fringe position: *Standard* or
 *Fringe-width fit*, search window, jump rejection). The defaults are the values
@@ -100,9 +100,12 @@ strain file), so it loses them, and its broken pieces look like noise. On
 fringes 10–20 nm wide sampled every 0.2 nm the flat top also makes the
 3-point position jitter (≈ 50 pm). *Fringe-width fit* sizes each fringe's search
 window (0.7) and a least-squares parabola over the raw samples (0.5) to its own
-half period, and the jump guard is switched off; the app makes this choice
-itself the first time it sees a file on which the standard tracker loses most
-fringes (a notice above the tabs says so). On the strain file: 20/20 fringes locked
+half period, and the jump guard is switched off. In the app this comes with the
+**Load-step run** checkbox under the data source (pre-ticked when a quick probe
+shows the standard tracker losing most fringes of the file): it also turns on the
+per-load condition and draws the tracks as plateau averages. The strain run of
+2026-10-15 ships as `data/strain.csv` for the tests (`FRINGELAB_EXAMPLE=data/strain.csv`
+shows it as the example). On the strain file: 20/20 fringes locked
 (was 1/20), jitter ≈ 10 pm (was 53 pm), and every load step comes out as a
 clean plateau (±10–40 pm). On the cooldown run it gives −140.1 / +364.5 pm/°C
 for the two headline fringes (standard: −141.3 / +359.3, which stay the quoted
@@ -112,16 +115,21 @@ numbers).
 column (the strain file's only condition column is the temperature, 21.7–22.7 °C).
 When the tracked wavelength sits on plateaus separated by jumps, the app finds
 them (`sms_analysis.steps.detect_plateaus`, on the locked fringe with the cleanest
-steps) and shows *Load steps — condition by hand* above the tabs: one row per
-plateau with its time span, shift and a value column, pre-filled as 0 for the
-unloaded plateaus and *first load + n × increment* for the loaded ones (default
-50 g steps — edit to match the experiment). The sidebar section *4 · Condition*
-offers *Column in the file* and *Load steps (by hand)* for every file; a stepped
-run starts on the latter, which replaces the condition everywhere (calibration,
-sensitivity table, maps, movie readout), with the first and last spectra of every plateau left out,
+steps) and, with *Load-step run* ticked, shows *Load steps — condition by hand*
+above the tabs: one row per plateau with its time span, shift and a value column,
+pre-filled as 0 for the unloaded plateaus and *first load + n × increment* for
+the loaded ones (default 50 g steps — edit to match the experiment). The values
+replace the condition everywhere (calibration, sensitivity table, maps, movie
+readout), with the first and last spectra of every plateau left out,
 so the sensitivity comes out per gram — Igor's *shift vs mass*. On the strain
 file (assuming 50 g steps): dip@1552.8 +11.8 pm/g, dip@1491.1 −18.4 pm/g,
 R² ≈ 0.99; the unloaded level drifts +0.22 nm over the run with the temperature.
+
+**Tracks drawn as plateau averages.** *3 · Fringe tracking → Draw the tracks as*
+(None / 7-frame median / plateau averages; the last is the default of a load-step
+run) smooths what is *drawn* — shift plot, Igor view, calibration scatter, movie
+panel — into Igor's clean staircase. Every fit still uses the locked frames as
+tracked, and the status line under the tiles says which is in use.
 
 **Flickering fringes.** A fringe whose top is so flat that two samples compete
 for the extremum (the peak at λc on the strain run) zig-zags by a nanometre

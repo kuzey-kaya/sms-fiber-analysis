@@ -83,30 +83,41 @@ def test_stepped_run_auto_tracker_and_step_condition(steps_csv):
 def _check_stepped_run(at):
     assert not at.exception, [str(e.value) for e in at.exception]
     assert at.session_state["track_mode"] == "Fringe-width fit" and at.session_state["reject_jumps"] is False
-    def mode_radio():   # re-fetched after every run: elements belong to one run's tree
-        found = [r for r in at.sidebar.radio if r.value in ("Column in the file", "Load steps (by hand)")]
+    def kind_box():     # re-fetched after every run: elements belong to one run's tree
+        found = [c for c in at.sidebar.checkbox if c.label.startswith("Load-step run")]
         assert len(found) == 1
         return found[0]
 
-    assert mode_radio().value == "Load steps (by hand)"                      # chosen automatically
+    assert kind_box().value                                                   # guessed from the file
     assert any("entered per load step" in c.value for c in at.caption)
-    mode_radio().set_value("Column in the file").run()                       # the file's column still works
+    assert any("plateau averages" in c.value for c in at.caption)
+    kind_box().set_value(False).run()                                         # a continuous run again
     assert not at.exception, [str(e.value) for e in at.exception]
+    assert at.session_state["track_mode"] == "Standard" and at.session_state["reject_jumps"] is True
     assert not any("entered per load step" in c.value for c in at.caption)
-    mode_radio().set_value("Load steps (by hand)").run()
+    kind_box().set_value(True).run()
     assert not at.exception, [str(e.value) for e in at.exception]
     sens = [d.value for d in at.dataframe if "sensitivity (pm/g)" in d.value.columns and "R²" in d.value.columns]
     assert sens and (sens[0]["R²"] > 0.99).all()
     assert sens[0]["sensitivity (pm/g)"].between(55, 65).all()        # 3 nm per 50 g
 
 
-def test_shipped_strain_example():
-    """The second example run: the fringe-width fit is chosen, 20/20 fringes locked, 17 plateaus."""
-    if not (Path(APP).parent / "data" / "strain.csv").exists():
+def test_strain_file():
+    """The advisor's strain run (shipped for the tests): recognised as a load-step run, the
+    fringe-width fit is chosen, 20/20 fringes locked, 17 plateaus."""
+    strain = Path(APP).parent / "data" / "strain.csv"
+    if not strain.exists():
         pytest.skip("data/strain.csv not present")
-    at = AppTest.from_file(APP, default_timeout=300).run()
-    at.sidebar.radio[0].set_value("Load steps run (data/strain.csv)").run()
+    os.environ["FRINGELAB_EXAMPLE"] = str(strain)      # read on every rerun of the script
+    try:
+        _check_strain_file(AppTest.from_file(APP, default_timeout=300).run())
+    finally:
+        os.environ.pop("FRINGELAB_EXAMPLE", None)
+
+
+def _check_strain_file(at):
     assert not at.exception, [str(e.value) for e in at.exception]
+    assert at.sidebar.radio[0].value == "Example run (strain.csv)"
     assert at.session_state["track_mode"] == "Fringe-width fit"
     assert any("17 plateaus found on dip@1552.8" in e.label for e in at.expander)
     assert any("20 / 20" in m.value for m in at.markdown)

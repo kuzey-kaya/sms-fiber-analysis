@@ -45,8 +45,7 @@ ROOT = Path(__file__).resolve().parent
 # The example runs offered in the sidebar (label -> file). FRINGELAB_EXAMPLE=<path> adds another
 # one, listed first (tests, trying a new file locally).
 EXAMPLES = {
-    "Cooldown run (data/data.csv)": ROOT / "data" / "data.csv",
-    "Load steps run (data/strain.csv)": ROOT / "data" / "strain.csv",
+    "Example run (data/data.csv)": ROOT / "data" / "data.csv",
 }
 if os.environ.get("FRINGELAB_EXAMPLE"):
     _extra = Path(os.environ["FRINGELAB_EXAMPLE"])
@@ -1030,9 +1029,8 @@ brand_slot.markdown(f'<div class="fl-brand">{brand_icon()}{APP_NAME}<small>Explo
 st.sidebar.header("1 · Data")
 sources = [*EXAMPLES, "Upload a CSV file"]
 source = st.sidebar.radio("Source", sources, label_visibility="collapsed",
-                          help="Two runs ship with the app: a continuous cooldown (temperature) and a "
-                               "load experiment (weights put on and taken off; enter the loads under "
-                               "Load steps above the tabs).")
+                          help="The example is a continuous cooldown. Upload your own run — for a load "
+                               "experiment (weights put on and taken off) tick *Load-step run* below.")
 
 EXAMPLE_CSV = EXAMPLES.get(source) or next(iter(EXAMPLES.values()), ROOT / "data" / "data.csv")
 file_bytes, suffix, file_name = None, ".csv", EXAMPLE_CSV.name
@@ -1064,6 +1062,7 @@ if source == "Upload a CSV file":
         format_guide(example, key="welcome")
         st.stop()
     file_bytes, suffix, file_name = upload.getvalue(), Path(upload.name).suffix or ".csv", upload.name
+kind_slot = st.sidebar.container()      # the run-type checkbox, filled once the file is known
 
 with st.sidebar.expander("File format guide"):
     st.markdown("One row per spectrum: condition, time, then one column per wavelength "
@@ -1119,17 +1118,30 @@ def _poor_lock(table: pd.DataFrame, min_lock: float = 90.0) -> bool:
                                or (table["locked_pct"] >= min_lock).sum() < 0.5 * len(table))
 
 
-# Once per file: try the standard tracker with the default settings; if most fringes lose lock
-# (load steps, very wide fringes) start this file on the fringe-width fit with the jump guard off.
-# Done before the widgets exist, because widget state cannot be changed after they are drawn.
-if st.session_state.get("auto_checked") != data_key:
-    st.session_state["auto_checked"] = data_key
-    st.session_state["auto_switched"] = False
+# Run type. One checkbox: a load-step run (strain) gets the fringe-width fit with the jump guard
+# off, the condition entered per load step and plateau-averaged tracks; a continuous run (the
+# cooldown) keeps the published defaults. Its first state for a new file comes from a probe: when the
+# standard tracker loses most fringes, the run is stepped (or its fringes are very wide).
+# All of this is set before the widgets exist, because widget state cannot change once drawn.
+kind_key = f"run_kind_{data_key}"
+if kind_key not in st.session_state:
     probe = fringe_table(track_all(data, data_key, 0.02, 5, 1.5, 11, 0.5), False)
-    if _poor_lock(probe):
-        st.session_state["track_mode"] = TRACK_MODES[1]
-        st.session_state["reject_jumps"] = False
-        st.session_state["auto_switched"] = True
+    st.session_state[kind_key] = bool(_poor_lock(probe))
+    st.session_state[f"kind_guess_{data_key}"] = st.session_state[kind_key]
+with kind_slot:
+    is_steps = st.checkbox("Load-step run (strain: weights put on and taken off)", key=kind_key,
+                           help="Tick for a staircase experiment: the tracker follows the jumps "
+                                "(fringe-width fit, no jump guard), the load of every plateau is entered "
+                                "in a table above the tabs and the tracks are drawn as plateau averages. "
+                                "Untick for a continuous run such as a temperature ramp. Pre-set from a "
+                                "quick look at the file.")
+TRACK_SMOOTH = ["None", "Median filter (7 frames)", "Plateau averages"]
+applied_key = f"kind_applied_{data_key}"
+if st.session_state.get(applied_key) != is_steps:
+    st.session_state[applied_key] = is_steps
+    st.session_state["track_mode"] = TRACK_MODES[1] if is_steps else TRACK_MODES[0]
+    st.session_state["reject_jumps"] = not is_steps
+    st.session_state["track_smooth"] = TRACK_SMOOTH[2] if is_steps else TRACK_SMOOTH[0]
 with st.sidebar.expander("3 · Fringe tracking", expanded=False):
     track_mode = st.radio(
         "Fringe position", TRACK_MODES, key="track_mode", horizontal=True,
@@ -1148,6 +1160,11 @@ with st.sidebar.expander("3 · Fringe tracking", expanded=False):
     max_step = st.slider("Largest allowed jump per spectrum (nm)", 0.05, 5.0, 0.5, 0.05,
                          disabled=not reject) if reject else None
     min_lock = st.slider("Count a fringe as tracked when locked ≥ (%)", 10, 100, 90, 5)
+    track_smooth = st.selectbox(
+        "Draw the tracks as", TRACK_SMOOTH, key="track_smooth",
+        help="Display only — every fit uses the locked frames as tracked. Median filter: removes "
+             "single-frame spikes. Plateau averages: one mean per plateau of a load-step run, drawn as "
+             "flat steps (Igor's staircase); falls back to the median filter when no plateaus are found.")
 st.sidebar.caption("Defaults are the values used for the published analysis; open a section to change them.")
 
 tracks = track_all(data, data_key, prominence, distance, search_window, smooth_window, max_step,
@@ -1162,6 +1179,33 @@ def use_width_fit():
 
 
 poor_lock = not width_aware and _poor_lock(table, min_lock)
+
+
+def display_tracks(tracks: dict, method: str, plateaus) -> dict:
+    """Copies of the tracks with the wavelength smoothed for drawing (the fits never see these).
+
+    Median filter: 7-frame running median over the locked frames.  Plateau averages: the mean
+    of the locked frames inside each plateau (boundaries from the step detection), i.e. a clean
+    staircase; rows between plateaus keep the median-filtered value.
+    """
+    if method == TRACK_SMOOTH[0]:
+        return tracks
+    from scipy.signal import medfilt
+    out = {}
+    for k, tr in tracks.items():
+        w = tr["wavelength"].to_numpy(float).copy()
+        ok = np.isfinite(w)
+        if ok.sum() >= 7:
+            w[ok] = medfilt(w[ok], 7)
+        if method == TRACK_SMOOTH[2] and plateaus is not None:
+            for _, p in plateaus.iterrows():
+                a, b = int(p["start"]), int(p["end"]) + 1
+                seg = w[a:b]
+                if np.isfinite(seg).any():
+                    w[a:b] = np.where(np.isfinite(seg), np.nanmean(seg), np.nan)
+        # the drawn condition is the filled one (the fits keep the blanks at the plateau edges)
+        out[k] = tr.assign(wavelength=w, temperature=data.temperature)
+    return out
 
 # --------------------------------------------------------------------------
 # load steps: the condition entered by hand, one value per plateau
@@ -1200,30 +1244,10 @@ def _apply_step_condition(cond: np.ndarray):
     tracked = table[table["locked_pct"] >= min_lock]
 
 
-COND_MODES = ["Column in the file", "Load steps (by hand)"]
-mode_key = f"cond_mode_{data_key}"
-if mode_key not in st.session_state:
-    # First time this file is seen: a stepped run with only a drifting temperature column starts
-    # on the load-step condition (set before the widget exists, as with the tracker choice).
-    st.session_state[mode_key] = COND_MODES[1] if plateaus is not None else COND_MODES[0]
-if plateaus is None:
-    st.session_state[mode_key] = COND_MODES[0]       # the step option does not apply to this run
-with st.sidebar.expander("4 · Condition", expanded=True):
-    cond_mode = st.radio(
-        "What the wavelength is calibrated against", COND_MODES, key=mode_key, disabled=plateaus is None,
-        help="Column in the file: the temperature/strain column found in the file (name it under "
-             "*Condition and columns* if it was missed). Load steps: a staircase run — weights put on "
-             "and taken off — where the file has no load column; enter one value per plateau in the "
-             "table above the tabs.")
-    if plateaus is not None:
-        st.caption(f"{len(plateaus)} plateaus found on {step_ref} — this looks like a load-step run.")
-    else:
-        st.caption("No load steps in this run (the condition changes continuously), so the file's "
-                   "column is used.")
-use_steps = cond_mode == COND_MODES[1] and plateaus is not None
+use_steps = is_steps and plateaus is not None
 
 header_slot = st.container()     # the header is drawn below, after the step editor has had its say
-if plateaus is not None:
+if is_steps and plateaus is not None:
     loaded = classify_plateaus(plateaus)
     with st.expander(f"Load steps — condition by hand ({len(plateaus)} plateaus found on {step_ref}, "
                      f"{int(loaded.sum())} with a load)", expanded=use_steps, icon=":material/stairs:"):
@@ -1231,9 +1255,7 @@ if plateaus is not None:
         with ctl:
             st.markdown("The wavelength sits on plateaus separated by jumps: a load was put on and "
                         "taken off. The file carries no load column, so enter one value per plateau "
-                        "and the sensitivity comes out per unit of load, like Igor's *shift vs mass*."
-                        + ("" if use_steps else " **Not in use** — choose *Load steps (by hand)* under "
-                                                "*4 · Condition* in the sidebar to calibrate against these values."))
+                        "and the sensitivity comes out per unit of load, like Igor's *shift vs mass*.")
             ref_options = list(tracked["fringe"])
             ref_choice = st.selectbox("Reference fringe for the step detection", ref_options,
                                       index=ref_options.index(step_ref), key=f"step_ref_{data_key}")
@@ -1273,12 +1295,13 @@ if plateaus is not None:
                        "the experiment; blank = leave that plateau out. *shift* is the plateau's mean "
                        f"wavelength of {step_ref} minus the first plateau's.")
         step_values = pd.to_numeric(edited["value"], errors="coerce").to_numpy(float)
-else:
-    with st.expander("Load steps — none found in this run", expanded=False, icon=":material/stairs:"):
-        st.markdown("The tracked wavelengths change continuously, without plateaus separated by jumps, "
-                    "so there is nothing to enter by hand here: the condition is the column found in "
-                    "the file. For a load experiment (weights put on and taken off) this box turns into "
-                    "a table with one row per plateau.")
+elif is_steps:
+    st.warning("*Load-step run* is ticked, but no plateaus separated by jumps were found on any tracked "
+               "fringe, so the condition column of the file is used. If this is a staircase experiment, "
+               "lower the prominence or check the tracking settings; otherwise untick it.")
+elif plateaus is not None:
+    st.caption(f"This run looks stepped ({len(plateaus)} plateaus on {step_ref}): tick *Load-step run* in "
+               "the sidebar to analyse it per load.")
 if plateaus is not None:
     if use_steps:
         cond_source = "steps"
@@ -1310,12 +1333,14 @@ stat_strip([
      f"locked ≥ {min_lock} % of spectra" + (f" · {int((~table['stable']).sum())} flickering" if (~table["stable"]).any() else "")),
 ])
 _flick = list(table.loc[~table["stable"], "fringe"])
+disp = display_tracks(tracks, track_smooth, plateaus if use_steps else None)
+_drawn = {TRACK_SMOOTH[0]: "as tracked", TRACK_SMOOTH[1]: "7-frame median",
+          TRACK_SMOOTH[2]: "plateau averages" if (use_steps and plateaus is not None) else "7-frame median (no plateaus)"}
 st.caption(
-    f"Tracking: **{track_mode}**, jump guard {'on' if max_step is not None else 'off'}"
-    + (" (chosen automatically for this file)" if st.session_state.get("auto_switched") and width_aware else "")
-    + f" · Condition: **{cond_name}** "
-    + ("entered per load step (*Load steps* below, *4 · Condition* in the sidebar)" if cond_source == "steps"
-       else "from the file" if has_cond else "none")
+    f"**{'Load-step run' if is_steps else 'Continuous run'}** · Tracking: {track_mode}, jump guard "
+    f"{'on' if max_step is not None else 'off'} · Condition: **{cond_name}** "
+    + ("entered per load step (table below)" if cond_source == "steps" else "from the file" if has_cond else "none")
+    + f" · Tracks drawn: {_drawn[track_smooth]} (fits use every locked frame)"
     + (f" · Flickering fringe{'s' if len(_flick) > 1 else ''} (flat top, jumps between samples): "
        f"{', '.join(_flick)} — tracked, but left out of the defaults and hidden in the shift plot." if _flick else ""))
 header_slot.__exit__(None, None, None)
@@ -1369,7 +1394,7 @@ with tab_map:
     else:
         z, z_title = data.spectra, "Transmittance"
 
-    overlay = {k: tracks[k] for k in tracked["fringe"]} if show_tracks else {}
+    overlay = {k: disp[k] for k in tracked["fringe"]} if show_tracks else {}
     st.plotly_chart(map_figure(data, z, y_mode, cond_title, cmap, zmid, clip, z_title, overlay),
                     width="stretch")
     st.caption("Every row is one spectrum; bright and dark bands are interference fringes. "
@@ -1412,7 +1437,7 @@ with tab_track:
                                          "5 % of its frames: its top is flat and two samples compete for the "
                                          "extremum. It stays in the tables; this only hides it in the plot.")
         shown_tr = tracked[tracked["stable"]] if (hide_flick and n_flick) else tracked
-        st.plotly_chart(shifts_figure({k: tracks[k] for k in shown_tr["fringe"]}, x_mode, cond_title),
+        st.plotly_chart(shifts_figure({k: disp[k] for k in shown_tr["fringe"]}, x_mode, cond_title),
                         width="stretch")
         st.caption("Each line is one fringe from the first spectrum, shown as its shift from where it started.")
 
@@ -1433,10 +1458,11 @@ with tab_track:
             chosen = [st.selectbox("Fringe (type @ wavelength in the first spectrum)", labels,
                                    index=labels.index(default), key="detail_fringe", format_func=fmt)]
         label = chosen[0]
-        track = tracks[label]
+        track = tracks[label]                 # fits
+        track_d = disp[label]                 # drawing
         left, right = st.columns(2)
         if len(chosen) > 1:
-            sel = {k: tracks[k] for k in chosen}
+            sel = {k: disp[k] for k in chosen}
             left.plotly_chart(igor_multi_figure(sel, has_cond, cond_title), width="stretch")
             left.caption("Each fringe as its shift from where it started (left axis) and the condition "
                          "(blue dotted, right axis) against time.")
@@ -1447,7 +1473,7 @@ with tab_track:
                         f = fit_sensitivity(tracks[k])
                     except ValueError:
                         continue
-                    fits_sel.append((k, tracks[k], f))
+                    fits_sel.append((k, disp[k], f))
                     rows.append(dict(fringe=k, sensitivity=f.slope * 1e3, stderr=f.stderr * 1e3,
                                      r_squared=f.r_squared, points=f.n_points))
                 if fits_sel:
@@ -1463,7 +1489,7 @@ with tab_track:
             else:
                 right.info(f"Calibration needs a {cond_name.lower()} column.")
         else:
-            left.plotly_chart(igor_figure(track, has_cond, cond_title), width="stretch")
+            left.plotly_chart(igor_figure(track_d, has_cond, cond_title), width="stretch")
             left.caption("Igor-style view: tracked wavelength (red, left axis) and the condition "
                          "(blue, right axis) against time.")
         if len(chosen) == 1 and has_cond:
@@ -1475,7 +1501,7 @@ with tab_track:
                                     help="Linear: one sensitivity for the whole run. Quadratic: the "
                                          "sensitivity changes along the run, as it does close to the "
                                          "critical wavelength. The lower panel shows measured − fitted.")
-                right.plotly_chart(calibration_figure(track, curv, model, cond_title, cond_unit),
+                right.plotly_chart(calibration_figure(track_d, curv, model, cond_title, cond_unit),
                                    width="stretch")
                 s_lo, s_hi = curv.sensitivity_at_ends_pm
                 q = curv.quadratic
@@ -1686,7 +1712,7 @@ with tab_movie:
             default_m = pick_default(table, tracked, has_cond)
             movie_label = c[0].selectbox("Fringe to follow", labels, index=labels.index(default_m), key="movie_fringe",
                                          help="Marked on the spectrum, used by the camera and by the lower-right panel.")
-            movie_track = tracks[movie_label]
+            movie_track = disp[movie_label]
         else:
             movie_label, movie_track = "", None
         every_m = c[1].slider("Every N-th spectrum", 1, max(2, len(data) // 20), max(1, int(np.ceil(len(data) / MOVIE_MAX_FRAMES))),
@@ -1720,7 +1746,7 @@ with tab_movie:
         rows_m = tuple(int(r) for r in frame_rows(len(data), every_m, MOVIE_MAX_FRAMES))
         if build_movie:
             ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window, fit_m)
-            all_m = ({k: tracks[k] for k in tracked[tracked["stable"]]["fringe"]}
+            all_m = ({k: disp[k] for k in tracked[tracked["stable"]]["fringe"]}
                      if panel_m == "All fringes" else None)
             st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m,
                                          mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,

@@ -152,22 +152,20 @@ GitHub's free monthly allowance is limited.
 
 ## 5. Using your own data
 
-- **Two example runs** are built in (sidebar → *1 · Data*): the cooldown and the
-  load-step experiment of 2026-10-15.
+- **One example run** is built in (sidebar → *1 · Data*): the cooldown.
 - **In the app:** sidebar → *1 · Data* → **Upload a CSV file**. The start page
   shows the expected layout and offers a template CSV to download; after loading,
   *How the file was read* (above the tabs) reports how each column was
   interpreted. Any layout the loader understands works (see *Data format* in the
   README). For strain or load runs, set the condition name, unit and columns
-  under *Condition and columns*. If most fringes lose lock with the standard
-  tracker (load steps, very wide fringes), the app switches to the *fringe-width
-  fit* by itself and says so above the tabs (*3 · Fringe tracking* changes it back).
-- **Load steps without a load column:** when the run is a staircase (load put on
-  and taken off), *Load steps — condition by hand* appears above the tabs. Enter
-  the load of every plateau (pre-filled with 50 g steps); with *4 · Condition* →
-  *Load steps (by hand)* in the sidebar (chosen automatically for a stepped run)
-  the Sensitivity and Fringe tracking tabs report pm per gram instead of pm per °C.
-  *Column in the file* switches back to the file's own temperature/strain column.
+  under *Condition and columns*. The *Load-step run* checkbox sets the tracker; *3 · Fringe tracking* changes it
+  by hand.
+- **Load-step (strain) runs:** tick **Load-step run** under the data source (it is
+  pre-ticked when the file looks stepped). The tracker then follows the jumps,
+  *Load steps — condition by hand* appears above the tabs — enter the load of
+  every plateau (pre-filled with 50 g steps) — and the Sensitivity and Fringe
+  tracking tabs report pm per gram instead of pm per °C, with the tracks drawn as
+  flat plateau averages. Untick it for a continuous run.
 - **One or several fringes:** on the Fringe tracking tab, *Fringes in detail* shows
   one fringe Igor-style or up to 10 fringes together.
 - **A fringe that flickers** (jumps back and forth between two samples because its

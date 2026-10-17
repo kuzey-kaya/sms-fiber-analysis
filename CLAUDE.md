@@ -151,9 +151,15 @@ It is a continuous cooldown — no setpoint steps.
   short segments; `classify_plateaus` drift-tolerant baseline; `default_step_values`;
   `step_condition` with `settle` rows blanked; `baseline_drift`). The app draws the header into
   `header_slot` so the step expander (`data_editor`) can decide the condition first; the choice is
-  the sidebar radio "4 · Condition" (`cond_mode_<data_key>`: "Column in the file" / "Load steps (by
-  hand)", defaulting to steps when plateaus were found — the owner wanted both options visible for
-  every file, 2026-10-17); `_apply_step_condition` swaps `data.temperature` and every track's `temperature` column.
+  the **Load-step run** checkbox (`run_kind_<data_key>`, drawn into `kind_slot` under the data
+  source, pre-set by the probe; `kind_applied_<data_key>` applies it to `track_mode`, `reject_jumps`
+  and `track_smooth` before those widgets are drawn) — 2026-10-17 the owner found two example runs
+  and a separate condition radio confusing, so the sidebar now has one example (the cooldown) and
+  this one switch; `data/strain.csv` stays for the tests (`FRINGELAB_EXAMPLE`); `_apply_step_condition`
+  swaps `data.temperature` and every track's `temperature` column. `display_tracks(tracks,
+  track_smooth, plateaus)` (None / 7-frame median / plateau averages = mean of the locked frames per
+  plateau) feeds every drawing (`disp[...]`: overlay, shift plot, Igor view, calibration scatter,
+  movie panels); fits keep the raw tracks — the owner's "still noisy, average it" (2026-10-17).
   Review pass 2026-10-17 (owner: "still noisy, the video too, and the two examples' interfaces
   differ"): `tracking.flicker_fraction` (% of frames with a > 0.2 nm reversal; > `FLICKER_LIMIT_PCT`
   = 5 → `table["stable"] == False`; only peak@1529.8 on the strain run, none on the cooldown — a
