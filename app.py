@@ -515,7 +515,7 @@ def igor_figure(track, has_cond, cond_title):
                              name="wavelength", line=dict(color=RED, width=1.6),
                              connectgaps=False), secondary_y=False)
     if has_cond:
-        fig.add_trace(go.Scatter(x=track["time"], y=track["temperature"], mode="lines",
+        fig.add_trace(go.Scatter(x=track["time"], y=track["temperature"].ffill().bfill(), mode="lines",
                                  name=cond_title, line=dict(color=BLUE, width=1.6)),
                       secondary_y=True)
         fig.update_yaxes(title_text=cond_title, color=BLUE, showgrid=False, secondary_y=True)
@@ -537,7 +537,7 @@ def igor_multi_figure(tracks_sel, has_cond, cond_title):
                                  connectgaps=False), secondary_y=False)
     first = next(iter(tracks_sel.values()))
     if has_cond:
-        fig.add_trace(go.Scatter(x=first["time"], y=first["temperature"], mode="lines", name=cond_title,
+        fig.add_trace(go.Scatter(x=first["time"], y=first["temperature"].ffill().bfill(), mode="lines", name=cond_title,
                                  line=dict(color=BLUE, width=1.2, dash="dot")), secondary_y=True)
         fig.update_yaxes(title_text=cond_title, color=BLUE, showgrid=False, secondary_y=True)
     fig.update_yaxes(title_text="Wavelength shift from start (nm)", secondary_y=False)
@@ -769,7 +769,7 @@ def movie_figure(data, rows, extrema, track, track_label, cond_name, cond_unit, 
                            mode="lines", line=dict(color=RED, width=1.6), name="wavelength", showlegend=False,
                            connectgaps=False),
                 go.Scatter(x=seg["time"] if (seg is not None and has_cond) else [],
-                           y=seg["temperature"] if (seg is not None and has_cond) else [],
+                           y=seg["temperature"].ffill().bfill() if (seg is not None and has_cond) else [],
                            mode="lines", line=dict(color=BLUE, width=1.6), name=cond_name, showlegend=False),
             ]
         return traces
@@ -1181,31 +1181,36 @@ def use_width_fit():
 poor_lock = not width_aware and _poor_lock(table, min_lock)
 
 
-def display_tracks(tracks: dict, method: str, plateaus) -> dict:
-    """Copies of the tracks with the wavelength smoothed for drawing (the fits never see these).
+def smooth_series(values: np.ndarray, method: str, plateaus) -> np.ndarray:
+    """A per-frame series smoothed for drawing (fits never see this).
 
-    Median filter: 7-frame running median over the locked frames.  Plateau averages: the mean
-    of the locked frames inside each plateau (boundaries from the step detection), i.e. a clean
-    staircase; rows between plateaus keep the median-filtered value.
+    Median filter: 7-frame running median over the finite frames.  Plateau averages: the mean of
+    the finite frames inside each plateau (boundaries from the step detection), i.e. a clean
+    staircase; frames outside the plateaus keep the median-filtered value.  Without plateaus the
+    plateau option falls back to the median filter.
     """
+    w = np.asarray(values, float).copy()
+    if method == TRACK_SMOOTH[0]:
+        return w
+    from scipy.signal import medfilt
+    ok = np.isfinite(w)
+    if ok.sum() >= 7:
+        w[ok] = medfilt(w[ok], 7)
+    if method == TRACK_SMOOTH[2] and plateaus is not None:
+        for _, p in plateaus.iterrows():
+            a, b = int(p["start"]), int(p["end"]) + 1
+            seg = w[a:b]
+            if np.isfinite(seg).any():
+                w[a:b] = np.where(np.isfinite(seg), np.nanmean(seg), np.nan)
+    return w
+
+
+def display_tracks(tracks: dict, method: str, plateaus) -> dict:
+    """Copies of the tracks with the wavelength smoothed for drawing (see :func:`smooth_series`)."""
     if method == TRACK_SMOOTH[0]:
         return tracks
-    from scipy.signal import medfilt
-    out = {}
-    for k, tr in tracks.items():
-        w = tr["wavelength"].to_numpy(float).copy()
-        ok = np.isfinite(w)
-        if ok.sum() >= 7:
-            w[ok] = medfilt(w[ok], 7)
-        if method == TRACK_SMOOTH[2] and plateaus is not None:
-            for _, p in plateaus.iterrows():
-                a, b = int(p["start"]), int(p["end"]) + 1
-                seg = w[a:b]
-                if np.isfinite(seg).any():
-                    w[a:b] = np.where(np.isfinite(seg), np.nanmean(seg), np.nan)
-        # the drawn condition is the filled one (the fits keep the blanks at the plateau edges)
-        out[k] = tr.assign(wavelength=w, temperature=data.temperature)
-    return out
+    return {k: tr.assign(wavelength=smooth_series(tr["wavelength"].to_numpy(float), method, plateaus))
+            for k, tr in tracks.items()}
 
 # --------------------------------------------------------------------------
 # load steps: the condition entered by hand, one value per plateau
@@ -1427,6 +1432,7 @@ with tab_track:
     if table.empty:
         st.info("No peaks or dips were found in the first spectrum. Lower the prominence in the sidebar.")
     else:
+        lock_of = table.set_index("fringe")["locked_pct"]
         hc = st.columns([1.2, 1.4, 2])
         x_mode = hc[0].radio("Horizontal axis", ["Time"] + (["Condition"] if has_cond else []),
                              format_func=y_label, horizontal=True, key="shift_x")
@@ -1437,14 +1443,25 @@ with tab_track:
                                          "5 % of its frames: its top is flat and two samples compete for the "
                                          "extremum. It stays in the tables; this only hides it in the plot.")
         shown_tr = tracked[tracked["stable"]] if (hide_flick and n_flick) else tracked
-        st.plotly_chart(shifts_figure({k: disp[k] for k in shown_tr["fringe"]}, x_mode, cond_title),
-                        width="stretch")
-        st.caption("Each line is one fringe from the first spectrum, shown as its shift from where it started.")
+        pool = list(shown_tr["fringe"])
+        sc1, sc2 = st.columns([2.4, 1])
+        shift_sel = sc1.multiselect("Fringes in the plot (empty = all)", pool, default=[],
+                                    key=f"shift_fringes_{data_key}", placeholder="All tracked fringes",
+                                    format_func=lambda k: f"{k} nm · locked {lock_of[k]:.0f}%")
+        shift_draw = sc2.selectbox("Lines", TRACK_SMOOTH, key=f"shift_draw_{data_key}",
+                                   index=TRACK_SMOOTH.index(
+                                       TRACK_SMOOTH[1] if track_smooth != TRACK_SMOOTH[0] else TRACK_SMOOTH[0]),
+                                   help="How these lines are drawn; the Igor view, calibration and movie "
+                                        "follow *Draw the tracks as* in the sidebar.")
+        shown = shift_sel or pool
+        disp_shift = display_tracks({k: tracks[k] for k in shown}, shift_draw, plateaus if use_steps else None)
+        st.plotly_chart(shifts_figure(disp_shift, x_mode, cond_title), width="stretch")
+        st.caption("Each line is one fringe from the first spectrum, shown as its shift from where it started. "
+                   "Pick one or a few fringes above to look at them alone.")
 
         st.subheader("Fringes in detail")
         default = pick_default(table, tracked, has_cond)
         labels = list(table["fringe"])
-        lock_of = table.set_index("fringe")["locked_pct"]
         fmt = lambda k: f"{k} nm · locked {lock_of[k]:.0f}%"  # noqa: E731
         detail_mode = st.radio("Show", ["One fringe (Igor style)", "Several fringes"], horizontal=True,
                                key="detail_mode", label_visibility="collapsed")
@@ -1611,7 +1628,15 @@ with tab_phase:
                       ("Span over the run", f"{sens_p.span_rad:.2f} rad", f"= {sens_p.span_fringes:.2f} fringe")]
         stat_strip(tiles)
         st.plotly_chart(phase_profile_figure(data, fit0_p), width="stretch")
-        st.plotly_chart(phase_readout_figure(ser, sens_p, la, lb, has_cond, cond_title), width="stretch")
+        pd1, pd2 = st.columns([1, 2.5])
+        phase_draw = pd1.selectbox("Draw the readout as", TRACK_SMOOTH, key=f"phase_draw_{data_key}",
+                                   index=TRACK_SMOOTH.index(track_smooth),
+                                   help="Display only: the slope, R² and the pair scan use every fitted frame.")
+        ser_d = ser.assign(phase_diff=smooth_series(ser["phase_diff"].to_numpy(float), phase_draw,
+                                                    plateaus if use_steps else None))
+        pd2.caption(f"Readout drawn as {_drawn[phase_draw].replace('as tracked', 'fitted frame by frame')}; "
+                    "the fit and the numbers above use every frame.")
+        st.plotly_chart(phase_readout_figure(ser_d, sens_p, la, lb, has_cond, cond_title), width="stretch")
         if has_cond:
             with st.expander("Which wavelength pair works best for this run? · what the readout sees"):
                 grid = np.arange(np.ceil(wl_min / 5) * 5 + 5, wl_max - 4, 5.0)

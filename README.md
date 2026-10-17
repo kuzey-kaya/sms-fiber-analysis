@@ -127,8 +127,10 @@ R² ≈ 0.99; the unloaded level drifts +0.22 nm over the run with the temperatu
 
 **Tracks drawn as plateau averages.** *3 · Fringe tracking → Draw the tracks as*
 (None / 7-frame median / plateau averages; the last is the default of a load-step
-run) smooths what is *drawn* — shift plot, Igor view, calibration scatter, movie
-panel — into Igor's clean staircase. Every fit still uses the locked frames as
+run) smooths what is *drawn* — Igor view, calibration scatter, movie panel, and the
+Phase readout — into Igor's clean staircase; the all-fringes shift plot has its own
+fringe picker and line setting (median by default) so single fringes can be
+looked at alone. Every fit still uses the locked frames as
 tracked, and the status line under the tiles says which is in use.
 
 **Flickering fringes.** A fringe whose top is so flat that two samples compete

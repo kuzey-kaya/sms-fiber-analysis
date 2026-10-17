@@ -160,6 +160,13 @@ It is a continuous cooldown — no setpoint steps.
   track_smooth, plateaus)` (None / 7-frame median / plateau averages = mean of the locked frames per
   plateau) feeds every drawing (`disp[...]`: overlay, shift plot, Igor view, calibration scatter,
   movie panels); fits keep the raw tracks — the owner's "still noisy, average it" (2026-10-17).
+  Then (same day, with screenshots): the all-fringes shift plot has its own fringe multiselect
+  (`shift_fringes_<key>`, empty = all) and its own "Lines" choice (`shift_draw_<key>`, defaulting to
+  the 7-frame median — the owner wanted that plot to keep some life) while the Phase readout is drawn
+  through the same `smooth_series` (`phase_draw_<key>`, default = the sidebar choice, i.e. plateau
+  averages on a step run) because its plateaus looked noisy; the condition line of the time plots is
+  ffill/bfill-ed at draw time (`display_tracks` keeps the blanked settle rows so the calibration
+  scatter does not pair a plateau mean with the previous load).
   Review pass 2026-10-17 (owner: "still noisy, the video too, and the two examples' interfaces
   differ"): `tracking.flicker_fraction` (% of frames with a > 0.2 nm reversal; > `FLICKER_LIMIT_PCT`
   = 5 → `table["stable"] == False`; only peak@1529.8 on the strain run, none on the cooldown — a

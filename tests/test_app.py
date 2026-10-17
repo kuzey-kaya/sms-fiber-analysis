@@ -125,6 +125,12 @@ def _check_strain_file(at):
     assert any("Flickering fringe" in c.value and "peak@1529.8" in c.value for c in at.caption)
     assert at.checkbox(key="hide_flicker").value
     assert "peak@1529.8" not in at.selectbox(key="detail_fringe").value       # never the default
+    shift_sel = [m for m in at.multiselect if m.label.startswith("Fringes in the plot")][0]
+    shift_sel.set_value(shift_sel.options[:1]).run()                          # one fringe alone
+    assert not at.exception, [str(e.value) for e in at.exception]
+    at.toggle(key="phase_compute").set_value(True).run()                      # readout drawn as plateau averages
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("Readout drawn as plateau averages" in c.value for c in at.caption)
     at.radio(key="detail_mode").set_value("One fringe (Igor style)").run()
     assert not at.exception
     at.radio(key="movie_kind").set_value("Spectra and fringes").run()

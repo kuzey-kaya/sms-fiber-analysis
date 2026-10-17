@@ -198,7 +198,7 @@ def render_movie(
             seg = track.iloc[: r + 1]
             trk_line.set_data(seg["time"], seg["wavelength"])
             if cond_line is not None:
-                cond_line.set_data(seg["time"], seg["temperature"])
+                cond_line.set_data(seg["time"], seg["temperature"].ffill().bfill())
         if progress:
             progress(k + 1, len(rows))
         return line, peaks, dips, stamp, cursor
