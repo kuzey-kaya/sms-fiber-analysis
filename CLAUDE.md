@@ -190,6 +190,14 @@ It is a continuous cooldown — no setpoint steps.
   sensitive reliably tracked one. `--phase [--lambda-a --lambda-b]` → `movie_phase.gif` via
   `movie.render_phase_movie` (numbered extrema, cubic over the first frame's ghost, λc, readout
   growing); at the end of the cooldown the λc extremum turns from dip to peak (24 → 25 extrema).
+- Speed (2026-10-17, the strain run took 60–90 s to open on Streamlit Cloud and the advisor read it
+  as "does not open"): `peaks.smooth` filters a whole 2-D run in one `savgol_filter` call (per-row
+  calls recompute the coefficients each time, ~30x slower) and `detect_extrema`/`fit_phase` take a
+  pre-smoothed spectrum; `fit_vertex` solves the 3x3 normal equations instead of `np.polyfit`;
+  `_read_table` keeps the sniffed parse when ≥ half of the columns are wavelengths instead of
+  re-reading the file six times; the Movie tab builds its Plotly animation only behind the
+  `movie_build` toggle (building it was ~40 % of a page load). Headless first run of the strain
+  example 32 s → 6 s locally. Profile with cProfile around `AppTest.run()` before guessing.
 - App Movie tab has a radio `movie_kind` at the top: "Spectra and fringes" (the original body,
   indented under `else:`) or "Phase readout (SM1E.2)" (`phase_movie_figure`, frames update traces
   1,2,3,5,6,7,8,9; the λ±n labels are their own `mode="text"` trace with 7 fixed slots because

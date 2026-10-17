@@ -35,6 +35,13 @@ def test_calibration_models(app, model):
 def test_both_movies(app, kind):
     app.radio(key="movie_kind").set_value(kind).run()
     assert not app.exception
+    app.toggle(key="movie_build").set_value(True).run()            # built on request only
+    assert not app.exception
+
+
+def test_movie_is_built_on_request_only():
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    assert not at.toggle(key="movie_build").value
 
 
 def test_upload_page_shows_the_format_guide():

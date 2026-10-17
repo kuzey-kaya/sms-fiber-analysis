@@ -1553,6 +1553,14 @@ with tab_3d:
 with tab_movie:
     movie_kind = st.radio("Movie", ["Spectra and fringes", "Phase readout (SM1E.2)"], horizontal=True,
                           key="movie_kind", label_visibility="collapsed")
+    # Building the animation takes several seconds and a few MB of figure data, so it is done on
+    # request: otherwise every page load (and every setting change) would pay for it.
+    build_movie = st.toggle("Build the animation", key="movie_build",
+                            help="The movie is built only when this is on; it takes a few seconds "
+                                 "and is rebuilt when the options change.")
+    if not build_movie:
+        st.caption("Turn on *Build the animation* to render the movie here. The options below apply "
+                   "once it is on.")
     if movie_kind == "Phase readout (SM1E.2)":
         st.markdown("The phase-unwrapping readout as a movie: each frame numbers the extrema λ±n around λc, "
                     "fits the cubic Δφ(λ) (the first frame's cubic stays as a grey ghost) and draws the "
@@ -1571,10 +1579,11 @@ with tab_movie:
                                   help="Fewer frames load faster; the last spectrum is always included.")
             fps_p = c[1].slider("Frames per second", 2, 30, 12, key="pm_fps")
             rows_p = [int(r) for r in frame_rows(len(data), every_p, MOVIE_MAX_FRAMES) if fits_m[int(r)] is not None]
-            st.plotly_chart(phase_movie_figure(data, rows_p, fits_m, la_m, lb_m, fps_p, cond_name, cond_unit),
-                            width="stretch")
-            st.caption(f"{len(rows_p)} frames · readout |φ({lb_m:g} nm) − φ({la_m:g} nm)|. Press ▶ Play, or drag "
-                       "the slider (time in minutes).")
+            if build_movie:
+                st.plotly_chart(phase_movie_figure(data, rows_p, fits_m, la_m, lb_m, fps_p, cond_name, cond_unit),
+                                width="stretch")
+                st.caption(f"{len(rows_p)} frames · readout |φ({lb_m:g} nm) − φ({la_m:g} nm)|. Press ▶ Play, or "
+                           "drag the slider (time in minutes).")
             with c[2]:
                 st.write("")
                 if st.button("Render as GIF for slides", key="pm_gif_btn",
@@ -1623,15 +1632,16 @@ with tab_movie:
         follow_nm_m = follow_m if (camera == "Follow the fringe" and movie_track is not None) else None
 
         rows_m = tuple(int(r) for r in frame_rows(len(data), every_m, MOVIE_MAX_FRAMES))
-        ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window)
-        all_m = {k: tracks[k] for k in tracked["fringe"]} if panel_m == "All fringes" else None
-        st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m,
-                                     mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,
-                                     panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond),
-                        width="stretch")
-        st.caption(f"{len(rows_m)} frames. Press ▶ Play, or drag the slider (time in minutes). "
-                   "Peaks and dips are detected with the sidebar settings on every frame; grey markers are "
-                   "their positions in the previous frames.")
+        if build_movie:
+            ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window)
+            all_m = {k: tracks[k] for k in tracked["fringe"]} if panel_m == "All fringes" else None
+            st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m,
+                                         mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,
+                                         panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond),
+                            width="stretch")
+            st.caption(f"{len(rows_m)} frames. Press ▶ Play, or drag the slider (time in minutes). "
+                       "Peaks and dips are detected with the sidebar settings on every frame; grey markers are "
+                       "their positions in the previous frames.")
         with c[3]:
             st.write("")
             if st.button("Render as GIF for slides", help="Draws every frame with matplotlib using the options "

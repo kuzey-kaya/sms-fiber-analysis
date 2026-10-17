@@ -46,7 +46,7 @@ import pandas as pd
 from scipy import stats
 
 from .io import SpectraSet
-from .peaks import detect_extrema
+from .peaks import detect_extrema, smooth
 
 PAPER_LAMBDA_A, PAPER_LAMBDA_B = 1545.0, 1570.0   # wavelengths used in SM1E.2
 
@@ -77,9 +77,9 @@ class PhaseFit:
         return out
 
 
-def _ordered_extrema(wavelengths, spectrum, prominence, distance, smooth_window):
+def _ordered_extrema(wavelengths, spectrum, prominence, distance, smooth_window, smoothed=None):
     ext = detect_extrema(wavelengths, spectrum, prominence=prominence, distance=distance,
-                         smooth_window=smooth_window)
+                         smooth_window=smooth_window, smoothed=smoothed)
     wl = np.r_[ext.peak_wavelengths, ext.dip_wavelengths]
     kind = np.array(["peak"] * len(ext.peak_wavelengths) + ["dip"] * len(ext.dip_wavelengths))
     order = np.argsort(wl)
@@ -116,6 +116,7 @@ def fit_phase(
     distance: int = 5,
     smooth_window: int = 11,
     candidates: int = 5,
+    smoothed: np.ndarray | None = None,
 ) -> PhaseFit | None:
     """Fit the SM1E.2 cubic phase model to one spectrum.
 
@@ -125,7 +126,7 @@ def fit_phase(
     best-fitting labelling wins.  Returns None when fewer than two extrema
     lie on either side.
     """
-    wl, kind = _ordered_extrema(wavelengths, spectrum, prominence, distance, smooth_window)
+    wl, kind = _ordered_extrema(wavelengths, spectrum, prominence, distance, smooth_window, smoothed)
     if len(wl) < 6:
         return None
     x0 = float(np.mean([wavelengths.min(), wavelengths.max()]))
@@ -164,8 +165,10 @@ def phase_fits(
 ) -> list[PhaseFit | None]:
     """:func:`fit_phase` for every spectrum; each frame's λc seeds the next."""
     fits, guess = [], lambda_c_guess
+    smoothed = smooth(data.spectra, smooth_window)        # once for the run, not once per spectrum
     for i in range(len(data)):
-        fit = fit_phase(data.wavelengths, data.spectra[i], guess, prominence, distance, smooth_window)
+        fit = fit_phase(data.wavelengths, data.spectra[i], guess, prominence, distance, smooth_window,
+                        smoothed=smoothed[i])
         fits.append(fit)
         if fit is not None and np.isfinite(fit.lambda_c):
             guess = fit.lambda_c

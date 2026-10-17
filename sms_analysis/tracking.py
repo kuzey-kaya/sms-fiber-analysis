@@ -123,7 +123,14 @@ def fit_vertex(wl: np.ndarray, y: np.ndarray, center: float, half_width: float,
     if m.sum() < 5:
         return np.nan, np.nan
     x = wl[m] - center
-    a, b, c = np.polyfit(x, y[m], 2)
+    # least-squares parabola by the normal equations: x is centred and |x| <= half_width,
+    # so the 3x3 system is well conditioned, and this is ~10x faster than np.polyfit
+    # (called once per fringe per spectrum)
+    X = np.column_stack((x * x, x, np.ones_like(x)))
+    try:
+        a, b, c = np.linalg.solve(X.T @ X, X.T @ y[m])
+    except np.linalg.LinAlgError:
+        return np.nan, np.nan
     if (kind == "dip" and a <= 0) or (kind == "peak" and a >= 0):
         return np.nan, np.nan
     off = -b / (2.0 * a)
@@ -183,8 +190,8 @@ def track_all_extrema(
         data.wavelengths, data.spectra[0], prominence=prominence,
         distance=distance, smooth_window=smooth_window,
     )
-    # Smooth every spectrum once; each fringe's tracker reuses the result.
-    smoothed = np.array([smooth(y, smooth_window) for y in data.spectra])
+    # Smooth the whole run in one call; each fringe's tracker reuses the result.
+    smoothed = smooth(data.spectra, smooth_window)
     all_pos = np.r_[first.peak_wavelengths, first.dip_wavelengths]
     halves = half_periods(all_pos) if all_pos.size > 1 else np.full(all_pos.size, np.inf)
     half_of = dict(zip(all_pos.tolist(), halves.tolist()))

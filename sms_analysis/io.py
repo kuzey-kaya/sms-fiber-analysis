@@ -96,6 +96,10 @@ def _read_table(path: Path) -> pd.DataFrame:
     except Exception:  # noqa: BLE001 - sniffing can fail on odd files
         best = pd.read_csv(path)
     best_score = _layout_score(best)
+    if best_score >= 10 and best_score >= 0.5 * best.shape[1]:
+        # Most columns already read as wavelengths: the sniffed parse is right, and the
+        # alternatives below would only re-read a large file several times for nothing.
+        return best
     for sep in (";", "\t", ","):
         for dec in (",", "."):
             if sep == dec:
