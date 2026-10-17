@@ -95,13 +95,32 @@ strain file), so it loses them, and its broken pieces look like noise. On
 fringes 10–20 nm wide sampled every 0.2 nm the flat top also makes the
 3-point position jitter (≈ 50 pm). *Fringe-width fit* sizes each fringe's search
 window (0.7) and a least-squares parabola over the raw samples (0.5) to its own
-half period, and the jump guard is switched off; the app offers this switch
-itself when most fringes lose lock. On the strain file: 20/20 fringes locked
+half period, and the jump guard is switched off; the app makes this choice
+itself the first time it sees a file on which the standard tracker loses most
+fringes (a notice above the tabs says so). On the strain file: 20/20 fringes locked
 (was 1/20), jitter ≈ 10 pm (was 53 pm), and every load step comes out as a
 clean plateau (±10–40 pm). On the cooldown run it gives −140.1 / +364.5 pm/°C
 for the two headline fringes (standard: −141.3 / +359.3, which stay the quoted
-numbers). Calibration against the condition still needs the load in the file:
-the strain file's only condition column is temperature (21.7–22.7 °C).
+numbers).
+
+**Load steps — the condition entered by hand.** A load file usually has no load
+column (the strain file's only condition column is the temperature, 21.7–22.7 °C).
+When the tracked wavelength sits on plateaus separated by jumps, the app finds
+them (`sms_analysis.steps.detect_plateaus`, on the locked fringe with the cleanest
+steps) and shows *Load steps — condition by hand* above the tabs: one row per
+plateau with its time span, shift and a value column, pre-filled as 0 for the
+unloaded plateaus and *first load + n × increment* for the loaded ones (default
+50 g steps — edit to match the experiment). Ticking *Use these step values as the
+condition* replaces the condition everywhere (calibration, sensitivity table,
+maps, movie readout), with the first and last spectra of every plateau left out,
+so the sensitivity comes out per gram — Igor's *shift vs mass*. On the strain
+file (assuming 50 g steps): dip@1552.8 +11.8 pm/g, dip@1491.1 −18.4 pm/g,
+R² ≈ 0.99; the unloaded level drifts +0.22 nm over the run with the temperature.
+
+**Several fringes at once.** *Fringes in detail* on the Fringe tracking tab takes
+up to 10 fringes: their shifts against time with the condition on the right axis,
+shift vs condition with one linear fit per fringe, and a table of the
+sensitivities.
 
 ## Install & run (scripts)
 

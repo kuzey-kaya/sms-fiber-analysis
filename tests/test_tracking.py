@@ -13,20 +13,6 @@ def test_half_periods():
     assert np.allclose(half_periods(np.array([10.0, 0.0, 4.0, 13.0])), [3.0, 4.0, 4.0, 3.0])
 
 
-@pytest.fixture(scope="module")
-def steps():
-    """SIMULATED: 30 nm period fringes every 0.2 nm, noise 0.008, the whole pattern stepping
-    0 → 3 → 0 → 6 nm in single frames (like a load put on and taken off)."""
-    rng = np.random.default_rng(0)
-    wl = np.round(np.arange(1450.0, 1650.01, 0.2), 1)
-    shift = np.repeat([0.0, 3.0, 0.0, 6.0, 0.0], 40)
-    spectra = np.array([0.6 + 0.3 * np.cos(2 * np.pi * (wl - 1450 - s) / 30.0) for s in shift])
-    spectra += rng.normal(0, 0.008, spectra.shape)
-    n = len(shift)
-    data = SpectraSet(wl, np.arange(n) * 3.6, np.full(n, np.nan), spectra, layout="simulated")
-    return data, shift
-
-
 def _error_and_lock(tracks, shift):
     errs, locks = [], []
     for tr in tracks.values():

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import io
 import json
 import tempfile
@@ -23,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import plotly.colors
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
@@ -33,10 +35,15 @@ from sms_analysis.io import SpectraSet
 from sms_analysis.movie import frame_rows, render_movie, render_phase_movie
 from sms_analysis.phase import (PAPER_LAMBDA_A, PAPER_LAMBDA_B, phase_fits, phase_sensitivity,
                                 phase_series, scan_pairs, tracked_phase_change)
+from sms_analysis.steps import (classify_plateaus, default_step_values, detect_plateaus, robust_jitter,
+                                step_condition)
 
 APP_NAME = "FringeLab"
 ROOT = Path(__file__).resolve().parent
-EXAMPLE_CSV = ROOT / "data" / "data.csv"
+# FRINGELAB_EXAMPLE=<path> makes another file the "example run" (tests, trying a new file locally).
+EXAMPLE_CSV = Path(os.environ.get("FRINGELAB_EXAMPLE", "") or ROOT / "data" / "data.csv")
+MAX_DETAIL_FRINGES = 10
+FRINGE_COLORS = plotly.colors.qualitative.D3
 
 RED, BLUE = "#ff0000", "#0000ff"        # Igor Pro trace colours
 PEAK_COLOR, DIP_COLOR = "#C4402F", "#2E5FA3"
@@ -475,6 +482,54 @@ def igor_figure(track, has_cond, cond_title):
     fig.update_yaxes(title_text="Peak Wavelength (nm)", color=RED, secondary_y=False)
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10),
                       xaxis_title="Time, seconds", showlegend=False)
+    return fig
+
+
+def igor_multi_figure(tracks_sel, has_cond, cond_title):
+    """Several fringes at once: each as its shift from where it started (left), condition (right)."""
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    for i, (label, tr) in enumerate(tracks_sel.items()):
+        ok = tr.dropna(subset=["wavelength"])
+        if ok.empty:
+            continue
+        fig.add_trace(go.Scatter(x=tr["time"], y=tr["wavelength"] - ok["wavelength"].iloc[0], mode="lines",
+                                 name=label, line=dict(color=FRINGE_COLORS[i % len(FRINGE_COLORS)], width=1.4),
+                                 connectgaps=False), secondary_y=False)
+    first = next(iter(tracks_sel.values()))
+    if has_cond:
+        fig.add_trace(go.Scatter(x=first["time"], y=first["temperature"], mode="lines", name=cond_title,
+                                 line=dict(color=BLUE, width=1.2, dash="dot")), secondary_y=True)
+        fig.update_yaxes(title_text=cond_title, color=BLUE, showgrid=False, secondary_y=True)
+    fig.update_yaxes(title_text="Wavelength shift from start (nm)", secondary_y=False)
+    fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Time, seconds",
+                      legend=dict(orientation="h", yanchor="top", y=-0.18, x=0))
+    return fig
+
+
+def calibration_multi_figure(fits_sel, cond_title, unit):
+    """Shift vs condition for several fringes with their linear fits; residuals below."""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.68, 0.32], vertical_spacing=0.06)
+    for i, (label, tr, fit) in enumerate(fits_sel):
+        color = FRINGE_COLORS[i % len(FRINGE_COLORS)]
+        ok = tr.dropna(subset=["wavelength", "temperature"])
+        w0 = ok["wavelength"].iloc[0]
+        t = np.linspace(ok["temperature"].min(), ok["temperature"].max(), 50)
+        fig.add_trace(go.Scatter(x=ok["temperature"], y=ok["wavelength"] - w0, mode="markers",
+                                 name=f"{label} · {fit.slope * 1e3:+.1f} pm/{unit}",
+                                 marker=dict(size=4, color=color, opacity=0.55),
+                                 hovertemplate=label + "<br>%{x:.2f} → %{y:+.3f} nm<extra></extra>"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=t, y=fit.intercept + fit.slope * t - w0, mode="lines", showlegend=False,
+                                 line=dict(color=color, width=1.8), hoverinfo="skip"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=ok["temperature"],
+                                 y=(ok["wavelength"] - (fit.intercept + fit.slope * ok["temperature"])) * 1e3,
+                                 mode="markers", showlegend=False, marker=dict(size=3.5, color=color, opacity=0.6),
+                                 hovertemplate=label + "<br>%{x:.2f} → %{y:+.0f} pm<extra></extra>"), row=2, col=1)
+    fig.add_hline(y=0, line_color="#999999", line_width=1, row=2, col=1)
+    fig.update_yaxes(title_text="Wavelength shift from start (nm)", row=1, col=1)
+    fig.update_yaxes(title_text="Residual (pm)", row=2, col=1)
+    fig.update_xaxes(title_text=cond_title, row=2, col=1)
+    fig.update_layout(height=540, margin=dict(l=10, r=10, t=40, b=10),
+                      legend=dict(orientation="h", yanchor="top", y=-0.16, x=0))
     return fig
 
 
@@ -928,7 +983,8 @@ brand_slot.markdown(f'<div class="fl-brand">{brand_icon()}{APP_NAME}<small>Explo
 st.sidebar.header("1 · Data")
 sources = ["Upload a CSV file"]
 if EXAMPLE_CSV.exists():
-    sources.insert(0, "Example run (data/data.csv)")
+    sources.insert(0, "Example run (data/data.csv)" if EXAMPLE_CSV == ROOT / "data" / "data.csv"
+                   else f"Example run ({EXAMPLE_CSV.name})")
 source = st.sidebar.radio("Source", sources, label_visibility="collapsed")
 
 file_bytes, suffix, file_name = None, ".csv", EXAMPLE_CSV.name
@@ -993,6 +1049,8 @@ if keep.sum() < 20:
     st.stop()
 data = replace(full, wavelengths=full.wavelengths[keep], spectra=full.spectra[:, keep])
 has_cond = data.has_temperature
+data_key = hashlib.md5(
+    (file_bytes or example_stamp.encode()) + repr((cond_col_txt, time_col_txt, wl_range)).encode()).hexdigest()
 
 with st.sidebar.expander("2 · Peak detection", expanded=False):
     prominence = st.number_input(
@@ -1003,9 +1061,27 @@ with st.sidebar.expander("2 · Peak detection", expanded=False):
                               help="Savitzky–Golay window applied before detection.")
 
 TRACK_MODES = ["Standard", "Fringe-width fit"]
-# Defaults through session state (not widget arguments): the advisory button below sets these keys.
+# Defaults through session state (not widget arguments), so the automatic choice below can set them.
 st.session_state.setdefault("track_mode", TRACK_MODES[0])
 st.session_state.setdefault("reject_jumps", True)
+
+
+def _poor_lock(table: pd.DataFrame, min_lock: float = 90.0) -> bool:
+    return len(table) > 0 and (table["locked_pct"].mean() < 80
+                               or (table["locked_pct"] >= min_lock).sum() < 0.5 * len(table))
+
+
+# Once per file: try the standard tracker with the default settings; if most fringes lose lock
+# (load steps, very wide fringes) start this file on the fringe-width fit with the jump guard off.
+# Done before the widgets exist, because widget state cannot be changed after they are drawn.
+if st.session_state.get("auto_checked") != data_key:
+    st.session_state["auto_checked"] = data_key
+    st.session_state["auto_switched"] = False
+    probe = fringe_table(track_all(data, data_key, 0.02, 5, 1.5, 11, 0.5), False)
+    if _poor_lock(probe):
+        st.session_state["track_mode"] = TRACK_MODES[1]
+        st.session_state["reject_jumps"] = False
+        st.session_state["auto_switched"] = True
 with st.sidebar.expander("3 · Fringe tracking", expanded=False):
     track_mode = st.radio(
         "Fringe position", TRACK_MODES, key="track_mode", horizontal=True,
@@ -1026,8 +1102,6 @@ with st.sidebar.expander("3 · Fringe tracking", expanded=False):
     min_lock = st.slider("Count a fringe as tracked when locked ≥ (%)", 10, 100, 90, 5)
 st.sidebar.caption("Defaults are the values used for the published analysis; open a section to change them.")
 
-data_key = hashlib.md5(
-    (file_bytes or example_stamp.encode()) + repr((cond_col_txt, time_col_txt, wl_range)).encode()).hexdigest()
 tracks = track_all(data, data_key, prominence, distance, search_window, smooth_window, max_step,
                    width_aware)
 table = fringe_table(tracks, has_cond)
@@ -1039,13 +1113,107 @@ def use_width_fit():
     st.session_state["reject_jumps"] = False
 
 
-poor_lock = (not width_aware and len(table) > 0
-             and (table["locked_pct"].mean() < 80 or len(tracked) < 0.5 * len(table)))
+poor_lock = not width_aware and _poor_lock(table, min_lock)
 
 # --------------------------------------------------------------------------
-# header
+# load steps: the condition entered by hand, one value per plateau
+# --------------------------------------------------------------------------
+cond_source = "file"
+plateaus, step_values, step_ref = None, None, None
+
+
+def _plateaus_of(label: str):
+    tr = tracks[label]
+    p = detect_plateaus(tr["time"].to_numpy(), tr["wavelength"].to_numpy())
+    return p if len(p) >= 3 and classify_plateaus(p).any() else None
+
+
+if len(tracked):
+    # reference fringe for the step detection: the locked fringe with the cleanest steps
+    # (largest range relative to its frame-to-frame jitter)
+    def _step_score(k):
+        w = tracks[k]["wavelength"].to_numpy()
+        return float(np.nanmax(w) - np.nanmin(w)) / max(robust_jitter(w), 1e-4)
+    step_ref = max(tracked["fringe"], key=_step_score)
+    plateaus = _plateaus_of(step_ref)
+
+
+def _apply_step_condition(cond: np.ndarray):
+    """Swap the condition column of the data and of every track for the step values."""
+    global data, tracks, table, tracked, has_cond
+    data = replace(data, temperature=cond)
+    tracks = {k: tr.assign(temperature=cond) for k, tr in tracks.items()}
+    has_cond = True
+    table = fringe_table(tracks, has_cond)
+    tracked = table[table["locked_pct"] >= min_lock]
+
+
+header_slot = st.container()     # the header is drawn below, after the step editor has had its say
+if plateaus is not None:
+    loaded = classify_plateaus(plateaus)
+    use_key = f"use_steps_{data_key}"
+    with st.expander(f"Load steps — condition by hand ({len(plateaus)} plateaus found on {step_ref}, "
+                     f"{int(loaded.sum())} with a load)", expanded=not st.session_state.get(use_key, False),
+                     icon=":material/stairs:"):
+        ctl, tbl = st.columns([1, 1.6])
+        with ctl:
+            st.markdown("The wavelength sits on plateaus separated by jumps: a load was put on and "
+                        "taken off. The file carries no load column, so enter one value per plateau "
+                        "and the sensitivity comes out per unit of load, like Igor's *shift vs mass*.")
+            use_steps = st.checkbox("Use these step values as the condition", key=use_key,
+                                    help="Replaces the condition column (temperature) by the values in the "
+                                         "table for calibration, sensitivity, maps and the movie readout.")
+            ref_options = list(tracked["fringe"])
+            ref_choice = st.selectbox("Reference fringe for the step detection", ref_options,
+                                      index=ref_options.index(step_ref), key=f"step_ref_{data_key}")
+            if ref_choice != step_ref:
+                alt = _plateaus_of(ref_choice)
+                if alt is None:
+                    st.warning(f"No clear steps on {ref_choice}; using {step_ref}.")
+                else:
+                    step_ref, plateaus, loaded = ref_choice, alt, classify_plateaus(alt)
+            sc1, sc2 = st.columns(2)
+            step_name = sc1.text_input("Condition name", "Mass", key="step_name")
+            step_unit = sc2.text_input("Unit", "g", key="step_unit")
+            f1, f2, f3 = st.columns(3)
+            fill_start = f1.number_input("First load", value=50.0, step=10.0, key="step_start")
+            fill_inc = f2.number_input("Increment", value=50.0, step=10.0, key="step_inc")
+            fill_base = f3.number_input("Unloaded", value=0.0, step=10.0, key="step_base")
+            settle = st.slider("Skip spectra at each end of a plateau", 0, 10, 2, key="step_settle",
+                               help="Spectra recorded while the load was being changed are left out.")
+        guess = default_step_values(plateaus, fill_start, fill_inc, fill_base)
+        editor = pd.DataFrame({
+            "plateau": plateaus["plateau"] + 1,
+            "from (min)": plateaus["t_start"] / 60.0, "to (min)": plateaus["t_end"] / 60.0,
+            "spectra": plateaus["n"], "shift (nm)": plateaus["shift"], "load": loaded,
+            "value": guess})
+        with tbl:
+            edited = st.data_editor(
+                editor, hide_index=True, width="stretch", height=min(40 + 35 * len(editor), 560),
+                key=f"step_editor_{data_key}_{step_ref}_{fill_start}_{fill_inc}_{fill_base}",
+                disabled=["plateau", "from (min)", "to (min)", "spectra", "shift (nm)", "load"],
+                column_config={"from (min)": st.column_config.NumberColumn(format="%.1f"),
+                               "to (min)": st.column_config.NumberColumn(format="%.1f"),
+                               "shift (nm)": st.column_config.NumberColumn(format="%+.3f"),
+                               "load": st.column_config.CheckboxColumn("loaded"),
+                               "value": st.column_config.NumberColumn(f"{step_name} ({step_unit})",
+                                                                      format="%.1f")})
+            st.caption("Pre-filled from *First load / Increment / Unloaded* — edit the values to match "
+                       "the experiment; blank = leave that plateau out. *shift* is the plateau's mean "
+                       f"wavelength of {step_ref} minus the first plateau's.")
+        step_values = pd.to_numeric(edited["value"], errors="coerce").to_numpy(float)
+    if use_steps:
+        cond_source = "steps"
+        cond_name, cond_unit = step_name, step_unit
+        cond_title = f"{cond_name} ({cond_unit})" if cond_unit else cond_name
+        _apply_step_condition(step_condition(len(data), plateaus, step_values, settle))
+
+# --------------------------------------------------------------------------
+# header (drawn into header_slot, above the step editor)
 # --------------------------------------------------------------------------
 strip = fringe_strip(data.wavelengths, data.spectra[0])
+_cond_ends = data.temperature[np.isfinite(data.temperature)] if has_cond else np.array([np.nan])
+header_slot.__enter__()
 hero(f"{file_name} — {len(data)} spectra, {len(data.wavelengths)} wavelengths, layout {data.layout}", strip,
      f"First spectrum, {data.wavelengths.min():.0f}–{data.wavelengths.max():.0f} nm, as a band: "
      "bright and dark stripes are the fringes the tracker follows.")
@@ -1056,15 +1224,23 @@ stat_strip([
     ("Wavelength (nm)", f"{data.wavelengths.min():.0f}–{data.wavelengths.max():.0f}",
      f"{len(data.wavelengths)} points · {np.median(np.diff(data.wavelengths)):.3g} nm step"),
     ("Duration", f"{(data.time.max() - data.time.min()) / 60:.0f} min", ""),
-    (cond_name, (f"{data.temperature[0]:.1f} → {data.temperature[-1]:.1f} {cond_unit}" if has_cond else "not in file"),
+    (cond_name, (f"{_cond_ends[0]:.1f} → {_cond_ends[-1]:.1f} {cond_unit}" if has_cond else "not in file"),
      f"{np.nanmin(data.temperature):.1f}–{np.nanmax(data.temperature):.1f} {cond_unit}" if has_cond else ""),
     ("Fringes tracked", f"{len(tracked)} / {len(table)}", f"locked ≥ {min_lock} % of spectra"),
 ])
+if cond_source == "steps":
+    st.caption(f"Condition = {cond_name} entered per load step (*Load steps* below); the file's own "
+               f"column is not used.")
+header_slot.__exit__(None, None, None)
 with st.expander("How the file was read · file format guide"):
     st.dataframe(read_report(full, cond_name, cond_unit), hide_index=True, width="stretch")
     st.markdown("If a column was taken for the wrong thing, name it under *Condition and columns* "
                 "in the sidebar (header name or 0-based column number).")
     format_guide(full if full.has_temperature else None, key="loaded")
+if st.session_state.get("auto_switched") and width_aware:
+    st.info("Tracking uses the **fringe-width fit** with the jump guard off: with the standard tracker "
+            "most fringes of this file lost lock (load steps or very wide fringes). "
+            "Change it under *3 · Fringe tracking* in the sidebar.", icon=":material/auto_fix_high:")
 if poor_lock:
     with st.container(border=True):
         st.markdown(
@@ -1149,21 +1325,54 @@ with tab_track:
                         width="stretch")
         st.caption("Each line is one fringe from the first spectrum, shown as its shift from where it started.")
 
-        st.subheader("One fringe in detail")
+        st.subheader("Fringes in detail")
         ranked = tracked.dropna(subset=["sensitivity_pm"])
         ranked = ranked[ranked["r_squared"] >= 0.9]
         default = (ranked.loc[ranked["sensitivity_pm"].abs().idxmax(), "fringe"] if len(ranked)
                    else (tracked["fringe"].iloc[0] if len(tracked) else table["fringe"].iloc[0]))
         labels = list(table["fringe"])
-        label = st.selectbox(
-            "Fringe (type @ wavelength in the first spectrum)", labels, index=labels.index(default),
-            format_func=lambda k: f"{k} nm · locked {table.set_index('fringe').loc[k, 'locked_pct']:.0f}%")
+        lock_of = table.set_index("fringe")["locked_pct"]
+        chosen = st.multiselect(
+            f"Fringes (type @ wavelength in the first spectrum; up to {MAX_DETAIL_FRINGES})", labels,
+            default=[default], max_selections=MAX_DETAIL_FRINGES, key="detail_fringes",
+            format_func=lambda k: f"{k} nm · locked {lock_of[k]:.0f}%")
+        if not chosen:
+            chosen = [default]
+        label = chosen[0]
         track = tracks[label]
         left, right = st.columns(2)
-        left.plotly_chart(igor_figure(track, has_cond, cond_title), width="stretch")
-        left.caption("Igor-style view: tracked wavelength (red, left axis) and the condition "
-                     "(blue, right axis) against time.")
-        if has_cond:
+        if len(chosen) > 1:
+            sel = {k: tracks[k] for k in chosen}
+            left.plotly_chart(igor_multi_figure(sel, has_cond, cond_title), width="stretch")
+            left.caption("Each fringe as its shift from where it started (left axis) and the condition "
+                         "(blue dotted, right axis) against time.")
+            if has_cond:
+                fits_sel, rows = [], []
+                for k in chosen:
+                    try:
+                        f = fit_sensitivity(tracks[k])
+                    except ValueError:
+                        continue
+                    fits_sel.append((k, tracks[k], f))
+                    rows.append(dict(fringe=k, sensitivity=f.slope * 1e3, stderr=f.stderr * 1e3,
+                                     r_squared=f.r_squared, points=f.n_points))
+                if fits_sel:
+                    right.plotly_chart(calibration_multi_figure(fits_sel, cond_title, cond_unit), width="stretch")
+                    st.dataframe(pd.DataFrame(rows).rename(columns={
+                        "sensitivity": f"sensitivity (pm/{cond_unit})", "stderr": f"± (pm/{cond_unit})",
+                        "r_squared": "R²"}), hide_index=True, width="stretch",
+                        column_config={f"sensitivity (pm/{cond_unit})": st.column_config.NumberColumn(format="%+.2f"),
+                                       f"± (pm/{cond_unit})": st.column_config.NumberColumn(format="%.2f"),
+                                       "R²": st.column_config.NumberColumn(format="%.4f")})
+                else:
+                    right.info("Too few locked points to fit these fringes.")
+            else:
+                right.info(f"Calibration needs a {cond_name.lower()} column.")
+        else:
+            left.plotly_chart(igor_figure(track, has_cond, cond_title), width="stretch")
+            left.caption("Igor-style view: tracked wavelength (red, left axis) and the condition "
+                         "(blue, right axis) against time.")
+        if len(chosen) == 1 and has_cond:
             try:
                 fit = fit_sensitivity(track)
                 curv = curvature_test(track)
@@ -1186,7 +1395,7 @@ with tab_track:
                     f"curvature {curv.curvature_pm_per_C2:+.2f} pm/{cond_unit}².")
             except ValueError:
                 right.info("Too few locked points to fit this fringe.")
-        else:
+        elif len(chosen) == 1:
             right.info(f"Calibration needs a {cond_name.lower()} column.")
 
 # ---- sensitivity ----------------------------------------------------------
@@ -1419,8 +1628,14 @@ with tab_export:
     settings = dict(file=file_name, layout=data.layout, condition=cond_name, unit=cond_unit,
                     wavelength_range_nm=list(wl_range), prominence=prominence, distance=distance,
                     smooth_window=smooth_window, search_window_nm=search_window,
-                    max_step_nm=max_step, min_lock_pct=min_lock, tracking=track_mode)
+                    max_step_nm=max_step, min_lock_pct=min_lock, tracking=track_mode,
+                    condition_source=cond_source)
     stem = Path(file_name).stem
+    if cond_source == "steps":
+        steps_out = plateaus.assign(value=step_values, loaded=classify_plateaus(plateaus))
+        settings["steps"] = (steps_out[["plateau", "t_start", "t_end", "n", "mean", "shift", "loaded", "value"]]
+                             .round(4).to_dict(orient="records"))
+        st.download_button("Load steps (CSV)", steps_out.to_csv(index=False), f"{stem}_steps.csv", "text/csv")
     c = st.columns(4)
     c[0].download_button("Tracked fringes (wide CSV)", wide.to_csv(index=False),
                          f"{stem}_tracked_wide.csv", "text/csv")

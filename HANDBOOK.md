@@ -157,9 +157,16 @@ GitHub's free monthly allowance is limited.
   *How the file was read* (above the tabs) reports how each column was
   interpreted. Any layout the loader understands works (see *Data format* in the
   README). For strain or load runs, set the condition name, unit and columns
-  under *Condition and columns*. If most fringes lose lock (load steps, very wide
-  fringes), the app shows a box with **Switch to the fringe-width fit**; press it
-  (or set *3 · Fringe tracking* → *Fringe-width fit* and untick *Reject jumps*).
+  under *Condition and columns*. If most fringes lose lock with the standard
+  tracker (load steps, very wide fringes), the app switches to the *fringe-width
+  fit* by itself and says so above the tabs (*3 · Fringe tracking* changes it back).
+- **Load steps without a load column:** when the run is a staircase (load put on
+  and taken off), *Load steps — condition by hand* appears above the tabs. Enter
+  the load of every plateau (pre-filled with 50 g steps), tick *Use these step
+  values as the condition*, and the Sensitivity and Fringe tracking tabs report
+  pm per gram instead of pm per °C.
+- **Several fringes at once:** on the Fringe tracking tab, *Fringes in detail*
+  accepts up to 10 fringes.
   An uploaded file is processed by the computer that runs the app; with 4b or 4c
   that is a cloud server.
 - **As the default example:** replace `data/data.csv` with your file.

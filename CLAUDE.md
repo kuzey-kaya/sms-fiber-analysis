@@ -141,7 +141,21 @@ It is a continuous cooldown — no setpoint steps.
   are cached per file + settings. Sidebar "3 · Fringe tracking" has the `track_mode` radio
   (Standard / Fringe-width fit) and the `reject_jumps` checkbox (defaults via session state); when
   the standard tracker's mean lock < 80 % or < half the fringes are tracked, a box above the tabs
-  offers "Switch to the fringe-width fit" (sets both keys). `run_analysis.py --width-fit --no-jump-guard`. "Tracked" in the app = locked ≥ 90 % of frames (21/24 on
+  offers "Switch to the fringe-width fit" (sets both keys). `run_analysis.py --width-fit --no-jump-guard`.
+  2026-10-17 (advisor's screen recording of 2026-10-15, where he uploaded the strain file and
+  saw noise): the choice is automatic — once per file (`auto_checked`/`auto_switched` in session
+  state) the standard tracker is probed with default settings *before the widgets are drawn*
+  (widget keys cannot be set afterwards) and, if `_poor_lock`, `track_mode`/`reject_jumps` are set.
+  `FRINGELAB_EXAMPLE=<path>` makes another file the example run (tests, local trials).
+  Load steps: `sms_analysis/steps.py` (`detect_plateaus` median-filtered jump split + merge of
+  short segments; `classify_plateaus` drift-tolerant baseline; `default_step_values`;
+  `step_condition` with `settle` rows blanked; `baseline_drift`). The app draws the header into
+  `header_slot` so the step expander (`use_steps_<key>`, `data_editor`) can decide the condition
+  first; `_apply_step_condition` swaps `data.temperature` and every track's `temperature` column.
+  "Fringes in detail" = `st.multiselect(key="detail_fringes", max_selections=10)` →
+  `igor_multi_figure` / `calibration_multi_figure`. Tests: `tests/test_steps.py`,
+  `test_app.py::test_stepped_run_auto_tracker_and_step_condition` (simulated CSV via
+  `steps_csv` fixture + `FRINGELAB_EXAMPLE`). "Tracked" in the app = locked ≥ 90 % of frames (21/24 on
   data/data.csv; the scripts' 22/24 counts R² ≥ 0.90). 2026-10-06 additions: file-format guide
   (`FORMAT_RULES`, `template_csv`, `format_guide`: start page, load-error page and the
   "How the file was read" expander, with a template CSV cut from the example run), `read_report`
@@ -288,5 +302,10 @@ repo — data publication still undecided): 914 spectra, 1425–1625 nm at 0.2 n
 55 min, columns temperature (21.7–22.7 °C, no load column) + time. Load is put on and taken off
 8 times (~3 min each, back to baseline between); with the width fit the dip at 1491.1 nm sits at
 −1.16, −2.10, −2.99, −3.84, −4.62, −5.37, −6.13, −8.28 nm on the loaded plateaus (dip@1552.8:
-+0.72 … +5.26; the λc peak@1529.8: +2.4 … +14.0). Load values per step: ask the advisor. Phase
-readout on it: not run yet.
++0.72 … +5.26; the λc peak@1529.8: +2.4 … +14.0). Igor (advisor's video): "peakmin1555 vs
+timemin1555" — the dip near 1555 nm stepping 1552.8 → 1558 nm, then `display shift1555 vs mass`
+with "Mass (grams)" on the x axis; his tracker call `trackpeaknew("n",1,1,914,wave0,"min1489",
+temp,tim,274,353,-1)` = minimum inside a fixed point band (274–353 ≈ 1479.8–1495.6 nm). The
+load per step is not in the file; the app's step editor assumes 50 g increments until the advisor
+confirms (last step is ≈ 1.35× the previous jump — probably a larger mass). Phase readout on it:
+not run yet.

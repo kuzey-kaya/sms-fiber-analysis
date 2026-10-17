@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,39 @@ def test_upload_page_shows_the_format_guide():
     at.sidebar.radio[0].set_value("Upload a CSV file").run()
     assert not at.exception
     assert len(at.get("download_button")) == 1          # the template CSV
+
+
+def test_several_fringes_in_detail():
+    # Fresh session: the module fixture has set the calibration radio, which is not drawn
+    # while several fringes are selected, and AppTest cannot carry that state across.
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    ms = at.multiselect(key="detail_fringes")
+    ms.set_value(ms.options[:3]).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    ms = at.multiselect(key="detail_fringes")               # re-fetch: elements belong to one run
+    assert len(ms.value) == 3
+    ms.set_value(ms.options[:1]).run()
+    assert not at.exception
+
+
+def test_stepped_run_auto_tracker_and_step_condition(steps_csv):
+    """A load-step file: the app starts on the fringe-width fit, finds the plateaus and, once the
+    step values are used as the condition, reports the sensitivity per gram."""
+    os.environ["FRINGELAB_EXAMPLE"] = str(steps_csv)     # read on every (re)run of the script
+    try:
+        _check_stepped_run(AppTest.from_file(APP, default_timeout=300).run())
+    finally:
+        os.environ.pop("FRINGELAB_EXAMPLE", None)
+
+
+def _check_stepped_run(at):
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert at.session_state["track_mode"] == "Fringe-width fit" and at.session_state["reject_jumps"] is False
+    box = [c for c in at.checkbox if c.label.startswith("Use these step values")]
+    assert len(box) == 1
+    box[0].check().run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("entered per load step" in c.value for c in at.caption)
+    sens = [d.value for d in at.dataframe if "sensitivity (pm/g)" in d.value.columns and "R²" in d.value.columns]
+    assert sens and (sens[0]["R²"] > 0.99).all()
+    assert sens[0]["sensitivity (pm/g)"].between(55, 65).all()        # 3 nm per 50 g
