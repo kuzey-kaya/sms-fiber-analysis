@@ -39,9 +39,14 @@ def test_both_movies(app, kind):
     assert not app.exception
 
 
-def test_movie_is_built_on_request_only():
+def test_movie_and_phase_are_computed_on_request_only():
     at = AppTest.from_file(APP, default_timeout=300).run()
     assert not at.toggle(key="movie_build").value
+    assert not at.toggle(key="phase_compute").value
+    assert not any("λc (first" in m.value for m in at.markdown)
+    at.toggle(key="phase_compute").set_value(True).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("λc (first" in m.value for m in at.markdown)          # the phase tiles appeared
 
 
 def test_upload_page_shows_the_format_guide():

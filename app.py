@@ -1476,9 +1476,20 @@ with tab_phase:
                 "its maximum is λc. The readout is the phase difference between two wavelengths, which "
                 "does not depend on how the extrema are labelled — that is what lets it run past one "
                 "fringe spacing without hopping.")
-    fits_p = phase_fits_cached(data, data_key, prominence, distance, smooth_window)
-    fit0_p = next((f for f in fits_p if f is not None), None)
-    if fit0_p is None:
+    # Fitting a cubic to every spectrum is the costliest step left in a page load, so it runs on
+    # request; the result is cached, so turning the toggle off and on again is free.
+    compute_phase = st.toggle("Compute the phase readout", key="phase_compute",
+                              help="Fits the phase model to every spectrum (a few seconds); the "
+                                   "result is kept for this file and these detection settings.")
+    if not compute_phase:
+        st.caption("Turn on *Compute the phase readout* to run the SM1E.2 analysis on this file.")
+        fit0_p = None
+    else:
+        fits_p = phase_fits_cached(data, data_key, prominence, distance, smooth_window)
+        fit0_p = next((f for f in fits_p if f is not None), None)
+    if not compute_phase:
+        pass
+    elif fit0_p is None:
         st.info("No spectrum has at least two extrema on each side of a critical wavelength inside the "
                 "selected band, so the phase profile cannot be built. Widen the wavelength range or lower "
                 "the prominence.")
@@ -1569,8 +1580,12 @@ with tab_movie:
                     "chosen in the Phase tab.")
         la_m = float(st.session_state.get("phase_a", PAPER_LAMBDA_A))
         lb_m = float(st.session_state.get("phase_b", PAPER_LAMBDA_B))
-        fits_m = phase_fits_cached(data, data_key, prominence, distance, smooth_window)
-        if not any(f is not None for f in fits_m):
+        # the phase fits are computed only once the movie is asked for (same cache as the Phase tab)
+        fits_m = (phase_fits_cached(data, data_key, prominence, distance, smooth_window)
+                  if build_movie else [None] * len(data))
+        if not build_movie:
+            pass
+        elif not any(f is not None for f in fits_m):
             st.info("No spectrum can be fitted with the phase model in the selected band.")
         else:
             c = st.columns([1, 1, 1.2])
