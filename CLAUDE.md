@@ -157,14 +157,15 @@ It is a continuous cooldown — no setpoint steps.
   and a separate condition radio confusing, so the sidebar now has one example (the cooldown) and
   this one switch; `data/strain.csv` stays for the tests (`FRINGELAB_EXAMPLE`); `_apply_step_condition`
   swaps `data.temperature` and every track's `temperature` column. `display_tracks(tracks,
-  track_smooth, plateaus)` (None / 7-frame median / plateau averages = mean of the locked frames per
-  plateau) feeds every drawing (`disp[...]`: overlay, shift plot, Igor view, calibration scatter,
-  movie panels); fits keep the raw tracks — the owner's "still noisy, average it" (2026-10-17).
-  Then (same day, with screenshots): the all-fringes shift plot has its own fringe multiselect
-  (`shift_fringes_<key>`, empty = all) and its own "Lines" choice (`shift_draw_<key>`, defaulting to
-  the 7-frame median — the owner wanted that plot to keep some life) while the Phase readout is drawn
-  through the same `smooth_series` (`phase_draw_<key>`, default = the sidebar choice, i.e. plateau
-  averages on a step run) because its plateaus looked noisy; the condition line of the time plots is
+  smooth_frames, smooth_flatten, plateaus)` — sidebar slider "Smooth the drawn lines (frames)", a
+  running median over 1–61 frames (default 9 on a step run, 1 on a continuous one) and the checkbox
+  "Flatten plateaus" (mean per plateau, Igor's staircase; step runs only) — feeds every drawing
+  (`disp[...]`: overlay, shift plot, Igor view, calibration scatter, movie panels, Phase readout via
+  `smooth_series`); fits keep the raw tracks. History 2026-10-17: the owner said "still noisy, average
+  it", then (with screenshots) wanted the all-fringes plot to keep some life and single fringes
+  selectable (`shift_fringes_<key>`, empty = all) and the Phase readout's plateaus calmer, then
+  "reduce the noise, don't kill it — make it adjustable" → the first attempt's fixed
+  None/median/plateau choice became the slider + checkbox; the condition line of the time plots is
   ffill/bfill-ed at draw time (`display_tracks` keeps the blanked settle rows so the calibration
   scatter does not pair a plateau mean with the previous load).
   Review pass 2026-10-17 (owner: "still noisy, the video too, and the two examples' interfaces

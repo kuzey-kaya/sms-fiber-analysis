@@ -164,8 +164,9 @@ GitHub's free monthly allowance is limited.
   pre-ticked when the file looks stepped). The tracker then follows the jumps,
   *Load steps — condition by hand* appears above the tabs — enter the load of
   every plateau (pre-filled with 50 g steps) — and the Sensitivity and Fringe
-  tracking tabs report pm per gram instead of pm per °C, with the tracks drawn as
-  flat plateau averages. Untick it for a continuous run.
+  tracking tabs report pm per gram instead of pm per °C. How much the drawn lines
+  are smoothed is yours: *3 · Fringe tracking → Smooth the drawn lines* (frames)
+  and *Flatten plateaus*. Untick *Load-step run* for a continuous run.
 - **One or several fringes:** on the Fringe tracking tab, *Fringes in detail* shows
   one fringe Igor-style or up to 10 fringes together.
 - **A fringe that flickers** (jumps back and forth between two samples because its

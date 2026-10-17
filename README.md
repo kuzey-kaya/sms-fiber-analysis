@@ -103,7 +103,7 @@ window (0.7) and a least-squares parabola over the raw samples (0.5) to its own
 half period, and the jump guard is switched off. In the app this comes with the
 **Load-step run** checkbox under the data source (pre-ticked when a quick probe
 shows the standard tracker losing most fringes of the file): it also turns on the
-per-load condition and draws the tracks as plateau averages. The strain run of
+per-load condition and a 9-frame median on the drawn lines. The strain run of
 2026-10-15 ships as `data/strain.csv` for the tests (`FRINGELAB_EXAMPLE=data/strain.csv`
 shows it as the example). On the strain file: 20/20 fringes locked
 (was 1/20), jitter ≈ 10 pm (was 53 pm), and every load step comes out as a
@@ -125,12 +125,14 @@ so the sensitivity comes out per gram — Igor's *shift vs mass*. On the strain
 file (assuming 50 g steps): dip@1552.8 +11.8 pm/g, dip@1491.1 −18.4 pm/g,
 R² ≈ 0.99; the unloaded level drifts +0.22 nm over the run with the temperature.
 
-**Tracks drawn as plateau averages.** *3 · Fringe tracking → Draw the tracks as*
-(None / 7-frame median / plateau averages; the last is the default of a load-step
-run) smooths what is *drawn* — Igor view, calibration scatter, movie panel, and the
-Phase readout — into Igor's clean staircase; the all-fringes shift plot has its own
-fringe picker and line setting (median by default) so single fringes can be
-looked at alone. Every fit still uses the locked frames as
+**Adjustable smoothing of the drawn lines.** *3 · Fringe tracking → Smooth the
+drawn lines (frames)* is a running median over 1 (as tracked) to 61 frames — a
+load-step run starts at 9, a continuous run at 1 — and *Flatten plateaus* turns
+a load-step run into Igor's clean staircase (one mean per plateau). Both act only
+on what is *drawn* (shift plot, Igor view, calibration scatter, movie panel, Phase
+readout); every fit uses the locked frames as tracked, and the status line under
+the tiles says what is in use. The all-fringes shift plot has a fringe picker so
+single fringes can be looked at alone. Every fit still uses the locked frames as
 tracked, and the status line under the tiles says which is in use.
 
 **Flickering fringes.** A fringe whose top is so flat that two samples compete

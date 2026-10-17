@@ -1135,13 +1135,13 @@ with kind_slot:
                                 "in a table above the tabs and the tracks are drawn as plateau averages. "
                                 "Untick for a continuous run such as a temperature ramp. Pre-set from a "
                                 "quick look at the file.")
-TRACK_SMOOTH = ["None", "Median filter (7 frames)", "Plateau averages"]
 applied_key = f"kind_applied_{data_key}"
 if st.session_state.get(applied_key) != is_steps:
     st.session_state[applied_key] = is_steps
     st.session_state["track_mode"] = TRACK_MODES[1] if is_steps else TRACK_MODES[0]
     st.session_state["reject_jumps"] = not is_steps
-    st.session_state["track_smooth"] = TRACK_SMOOTH[2] if is_steps else TRACK_SMOOTH[0]
+    st.session_state["smooth_frames"] = 9 if is_steps else 1       # the owner decides how much
+    st.session_state["smooth_flatten"] = False
 with st.sidebar.expander("3 · Fringe tracking", expanded=False):
     track_mode = st.radio(
         "Fringe position", TRACK_MODES, key="track_mode", horizontal=True,
@@ -1160,11 +1160,14 @@ with st.sidebar.expander("3 · Fringe tracking", expanded=False):
     max_step = st.slider("Largest allowed jump per spectrum (nm)", 0.05, 5.0, 0.5, 0.05,
                          disabled=not reject) if reject else None
     min_lock = st.slider("Count a fringe as tracked when locked ≥ (%)", 10, 100, 90, 5)
-    track_smooth = st.selectbox(
-        "Draw the tracks as", TRACK_SMOOTH, key="track_smooth",
-        help="Display only — every fit uses the locked frames as tracked. Median filter: removes "
-             "single-frame spikes. Plateau averages: one mean per plateau of a load-step run, drawn as "
-             "flat steps (Igor's staircase); falls back to the median filter when no plateaus are found.")
+    smooth_frames = st.slider(
+        "Smooth the drawn lines (frames)", 1, 61, step=2, key="smooth_frames",
+        help="Display only — every fit uses the locked frames as tracked. 1 = as tracked; larger = a "
+             "running median over that many frames (removes spikes, keeps the steps). Applies to the shift "
+             "plot, the Igor view, the calibration scatter, the movie panel and the phase readout.")
+    smooth_flatten = st.checkbox(
+        "Flatten plateaus (one mean per load step)", key="smooth_flatten", disabled=not is_steps,
+        help="Load-step runs only: draw each plateau as its mean — Igor's clean staircase.")
 st.sidebar.caption("Defaults are the values used for the published analysis; open a section to change them.")
 
 tracks = track_all(data, data_key, prominence, distance, search_window, smooth_window, max_step,
@@ -1181,22 +1184,22 @@ def use_width_fit():
 poor_lock = not width_aware and _poor_lock(table, min_lock)
 
 
-def smooth_series(values: np.ndarray, method: str, plateaus) -> np.ndarray:
+def smooth_series(values: np.ndarray, frames: int, flatten: bool, plateaus) -> np.ndarray:
     """A per-frame series smoothed for drawing (fits never see this).
 
-    Median filter: 7-frame running median over the finite frames.  Plateau averages: the mean of
-    the finite frames inside each plateau (boundaries from the step detection), i.e. a clean
-    staircase; frames outside the plateaus keep the median-filtered value.  Without plateaus the
-    plateau option falls back to the median filter.
+    ``frames`` > 1: running median over that many (odd) finite frames — spikes go, steps stay.
+    ``flatten`` with plateaus: every plateau (boundaries from the step detection) becomes the mean
+    of its finite frames, i.e. a clean staircase; frames outside the plateaus keep the median value.
     """
     w = np.asarray(values, float).copy()
-    if method == TRACK_SMOOTH[0]:
+    frames = int(frames) | 1
+    if frames <= 1 and not (flatten and plateaus is not None):
         return w
-    from scipy.signal import medfilt
     ok = np.isfinite(w)
-    if ok.sum() >= 7:
-        w[ok] = medfilt(w[ok], 7)
-    if method == TRACK_SMOOTH[2] and plateaus is not None:
+    if frames > 1 and ok.sum() >= frames:
+        from scipy.signal import medfilt
+        w[ok] = medfilt(w[ok], frames)
+    if flatten and plateaus is not None:
         for _, p in plateaus.iterrows():
             a, b = int(p["start"]), int(p["end"]) + 1
             seg = w[a:b]
@@ -1205,11 +1208,11 @@ def smooth_series(values: np.ndarray, method: str, plateaus) -> np.ndarray:
     return w
 
 
-def display_tracks(tracks: dict, method: str, plateaus) -> dict:
+def display_tracks(tracks: dict, frames: int, flatten: bool, plateaus) -> dict:
     """Copies of the tracks with the wavelength smoothed for drawing (see :func:`smooth_series`)."""
-    if method == TRACK_SMOOTH[0]:
+    if frames <= 1 and not (flatten and plateaus is not None):
         return tracks
-    return {k: tr.assign(wavelength=smooth_series(tr["wavelength"].to_numpy(float), method, plateaus))
+    return {k: tr.assign(wavelength=smooth_series(tr["wavelength"].to_numpy(float), frames, flatten, plateaus))
             for k, tr in tracks.items()}
 
 # --------------------------------------------------------------------------
@@ -1340,14 +1343,15 @@ stat_strip([
      f"locked ≥ {min_lock} % of spectra" + (f" · {int((~table['stable']).sum())} flickering" if (~table["stable"]).any() else "")),
 ])
 _flick = list(table.loc[~table["stable"], "fringe"])
-disp = display_tracks(tracks, track_smooth, plateaus if use_steps else None)
-_drawn = {TRACK_SMOOTH[0]: "as tracked", TRACK_SMOOTH[1]: "7-frame median",
-          TRACK_SMOOTH[2]: "plateau averages" if (use_steps and plateaus is not None) else "7-frame median (no plateaus)"}
+_plat = plateaus if use_steps else None
+disp = display_tracks(tracks, smooth_frames, smooth_flatten, _plat)
+_drawn = ("plateau averages" if (smooth_flatten and _plat is not None)
+          else f"{smooth_frames}-frame median" if smooth_frames > 1 else "as tracked")
 st.caption(
     f"**{'Load-step run' if is_steps else 'Continuous run'}** · Tracking: {track_mode}, jump guard "
     f"{'on' if max_step is not None else 'off'} · Condition: **{cond_name}** "
     + ("entered per load step (table below)" if cond_source == "steps" else "from the file" if has_cond else "none")
-    + f" · Tracks drawn: {_drawn[track_smooth]} (fits use every locked frame)"
+    + f" · Lines drawn: {_drawn} (fits use every locked frame)"
     + (f" · Flickering fringe{'s' if len(_flick) > 1 else ''} (flat top, jumps between samples): "
        f"{', '.join(_flick)} — tracked, but left out of the defaults and hidden in the shift plot." if _flick else ""))
 header_slot.__exit__(None, None, None)
@@ -1446,20 +1450,14 @@ with tab_track:
                                          "extremum. It stays in the tables; this only hides it in the plot.")
         shown_tr = tracked[tracked["stable"]] if (hide_flick and n_flick) else tracked
         pool = list(shown_tr["fringe"])
-        sc1, sc2 = st.columns([2.4, 1])
-        shift_sel = sc1.multiselect("Fringes in the plot (empty = all)", pool, default=[],
-                                    key=f"shift_fringes_{data_key}", placeholder="All tracked fringes",
-                                    format_func=lambda k: f"{k} nm · locked {lock_of[k]:.0f}%")
-        shift_draw = sc2.selectbox("Lines", TRACK_SMOOTH, key=f"shift_draw_{data_key}",
-                                   index=TRACK_SMOOTH.index(
-                                       TRACK_SMOOTH[1] if track_smooth != TRACK_SMOOTH[0] else TRACK_SMOOTH[0]),
-                                   help="How these lines are drawn; the Igor view, calibration and movie "
-                                        "follow *Draw the tracks as* in the sidebar.")
+        shift_sel = st.multiselect("Fringes in the plot (empty = all)", pool, default=[],
+                                   key=f"shift_fringes_{data_key}", placeholder="All tracked fringes",
+                                   format_func=lambda k: f"{k} nm · locked {lock_of[k]:.0f}%")
         shown = shift_sel or pool
-        disp_shift = display_tracks({k: tracks[k] for k in shown}, shift_draw, plateaus if use_steps else None)
-        st.plotly_chart(shifts_figure(disp_shift, x_mode, cond_title), width="stretch")
-        st.caption("Each line is one fringe from the first spectrum, shown as its shift from where it started. "
-                   "Pick one or a few fringes above to look at them alone.")
+        st.plotly_chart(shifts_figure({k: disp[k] for k in shown}, x_mode, cond_title), width="stretch")
+        st.caption(f"Each line is one fringe from the first spectrum, shown as its shift from where it started "
+                   f"({_drawn}; *Smooth the drawn lines* in the sidebar sets how much). Pick one or a few "
+                   "fringes above to look at them alone.")
 
         st.subheader("Fringes in detail")
         default = pick_default(table, tracked, has_cond)
@@ -1634,14 +1632,10 @@ with tab_phase:
                       ("Span over the run", f"{sens_p.span_rad:.2f} rad", f"= {sens_p.span_fringes:.2f} fringe")]
         stat_strip(tiles)
         st.plotly_chart(phase_profile_figure(data, fit0_p), width="stretch")
-        pd1, pd2 = st.columns([1, 2.5])
-        phase_draw = pd1.selectbox("Draw the readout as", TRACK_SMOOTH, key=f"phase_draw_{data_key}",
-                                   index=TRACK_SMOOTH.index(track_smooth),
-                                   help="Display only: the slope, R² and the pair scan use every fitted frame.")
-        ser_d = ser.assign(phase_diff=smooth_series(ser["phase_diff"].to_numpy(float), phase_draw,
-                                                    plateaus if use_steps else None))
-        pd2.caption(f"Readout drawn as {_drawn[phase_draw].replace('as tracked', 'fitted frame by frame')}; "
-                    "the fit and the numbers above use every frame.")
+        ser_d = ser.assign(phase_diff=smooth_series(ser["phase_diff"].to_numpy(float), smooth_frames,
+                                                    smooth_flatten, _plat))
+        st.caption(f"Readout drawn as {_drawn.replace('as tracked', 'fitted frame by frame')} "
+                   "(*Smooth the drawn lines* in the sidebar); the fit and the numbers above use every frame.")
         st.plotly_chart(phase_readout_figure(ser_d, sens_p, la, lb, has_cond, cond_title), width="stretch")
         if has_cond:
             with st.expander("Which wavelength pair works best for this run? · what the readout sees"):

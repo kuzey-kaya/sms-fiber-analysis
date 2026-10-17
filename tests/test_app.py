@@ -90,7 +90,8 @@ def _check_stepped_run(at):
 
     assert kind_box().value                                                   # guessed from the file
     assert any("entered per load step" in c.value for c in at.caption)
-    assert any("plateau averages" in c.value for c in at.caption)
+    assert any("9-frame median" in c.value for c in at.caption)                # adjustable, not flattened
+    assert at.session_state["smooth_frames"] == 9 and at.session_state["smooth_flatten"] is False
     kind_box().set_value(False).run()                                         # a continuous run again
     assert not at.exception, [str(e.value) for e in at.exception]
     assert at.session_state["track_mode"] == "Standard" and at.session_state["reject_jumps"] is True
@@ -128,9 +129,16 @@ def _check_strain_file(at):
     shift_sel = [m for m in at.multiselect if m.label.startswith("Fringes in the plot")][0]
     shift_sel.set_value(shift_sel.options[:1]).run()                          # one fringe alone
     assert not at.exception, [str(e.value) for e in at.exception]
-    at.toggle(key="phase_compute").set_value(True).run()                      # readout drawn as plateau averages
+    at.toggle(key="phase_compute").set_value(True).run()                      # readout drawn smoothed
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("Readout drawn as 9-frame median" in c.value for c in at.caption)
+    at.checkbox(key="smooth_flatten").set_value(True).run()                   # the owner may flatten
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("Readout drawn as plateau averages" in c.value for c in at.caption)
+    at.slider(key="smooth_frames").set_value(1).run()
+    at.checkbox(key="smooth_flatten").set_value(False).run()                  # or not smooth at all
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("Lines drawn: as tracked" in c.value for c in at.caption)
     at.radio(key="detail_mode").set_value("One fringe (Igor style)").run()
     assert not at.exception
     at.radio(key="movie_kind").set_value("Spectra and fringes").run()
