@@ -49,3 +49,26 @@ def test_simulated_runs_recover_the_known_phase_difference(common, tilt):
     err -= np.median(err)
     assert np.abs(err).max() < 0.2
     assert (got[-1] - got[0]) == pytest.approx(tilt, abs=0.1)
+
+
+
+def test_local_fit_refines_the_cooldown_readout(data, fits):
+    """PTL local two-mode fit: on the cooldown the 1545/1570 readout scatters about its line
+    by ~6.6 mrad instead of ~25 mrad, every frame refined, with t1 ≈ 0.71 and t2 ≈ 0.18."""
+    from sms_analysis.phase import local_fit, phase_series
+    ser = phase_series(data, 1545.0, 1570.0, fits=fits, local=True)
+    assert ser["local_ok"].all()
+    ok = ser.dropna(subset=["phase_diff", "temperature"])
+
+    def scatter(col):
+        k = np.polyfit(ok["temperature"], ok[col], 1)
+        return float(np.std(ok[col] - np.polyval(k, ok["temperature"])))
+
+    assert scatter("phase_diff") < 0.012
+    assert scatter("phase_diff") < 0.4 * scatter("phase_diff_cubic")
+    assert 0.65 < ser["t1_a"].mean() < 0.76 and 0.15 < ser["t2_a"].mean() < 0.22
+    f0 = next(f for f in fits if f is not None)
+    lf = local_fit(data.wavelengths, data.spectra[0], f0, 1570.0)
+    assert lf is not None and lf.converged and lf.rms < 0.01
+    assert abs(lf.phi - lf.phi_cubic) < 0.3                      # same branch as the cubic
+    assert local_fit(data.wavelengths, data.spectra[0], f0, f0.lambda_c + 2.0) is None   # window holds λc

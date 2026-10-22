@@ -228,7 +228,22 @@ the band. A phase difference cancels the common part and sees only the tilt. The
 paper demonstrates strain, where the profile changes shape; for temperature it
 names wide-range measurement as future work.
 
-**Is the implementation right?** Three checks, all in `tests/test_phase.py`:
+**Local two-mode fit (the PTL manuscript's refinement).** After the cubic, the
+phase at each of the two wavelengths is refined by a nonlinear least-squares fit
+of T(λ) = t₁² + t₂² + 2t₁t₂cos φ(λ) over two fringe cycles around it, with the
+cubic's coefficients and the mode powers t₁, t₂ as parameters (t₁, t₂ start from
+the nearest maximum and minimum, Eq. 9). It is on by default in the app's Phase
+tab (*Local two-mode fit (PTL)*) and in `phase_analysis.py` (`--no-local` turns
+it off); the series keeps the cubic values in `phase_diff_cubic`. Measured
+2026-10-22 as the scatter of the readout about its straight line: cooldown
+1545/1570 nm 25 → 6.6 mrad (0.80 → 0.20 °C resolution), 1485/1565 nm 21 → 5.5
+mrad; strain run 1560/1600 nm 60 → 9 mrad, within-plateau noise 47 → 4 mrad,
+R² 0.80 → 0.994. t₁ ≈ 0.70–0.80 and t₂ ≈ 0.15–0.21 (visibility ≈ 0.5), fit RMS
+≈ 0.003 (cooldown) / 0.01 (strain) in transmittance. A window that would contain
+λc is refused (1545 nm on the strain run, λc ≈ 1530 nm) and that frame keeps the
+cubic values — pick both wavelengths on one side of λc, as the paper does.
+
+**Is the implementation right?** Four checks, all in `tests/test_phase.py`:
 
 - The labelling of the first spectrum matches the paper's Fig. 1 extremum by extremum.
 - The result does not depend on how λc is picked: a fixed 1525 nm guess, one

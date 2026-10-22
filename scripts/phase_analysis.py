@@ -117,6 +117,8 @@ def main() -> None:
     p.add_argument("--lambda-a", type=float, default=PAPER_LAMBDA_A, help="first wavelength (nm), paper: 1545")
     p.add_argument("--lambda-b", type=float, default=PAPER_LAMBDA_B, help="second wavelength (nm), paper: 1570")
     p.add_argument("--prominence", type=float, default=0.02)
+    p.add_argument("--no-local", action="store_true",
+                   help="skip the PTL local two-mode fit around the two wavelengths (cubic only)")
     a = p.parse_args()
 
     outdir = Path(a.outdir)
@@ -134,7 +136,7 @@ def main() -> None:
           f"RMS {fit0.rms:.3f} rad, {len(fit0.wavelengths)} extrema")
     profile_figure(data, fit0, outdir / "fig21_phase_profile.png")
 
-    series = phase_series(data, a.lambda_a, a.lambda_b, fits=fits)
+    series = phase_series(data, a.lambda_a, a.lambda_b, fits=fits, local=not a.no_local)
     series.to_csv(outdir / "phase_series.csv", index=False)
     sens = None
     if data.has_temperature:

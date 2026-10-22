@@ -272,6 +272,22 @@ def track_all(_data: SpectraSet, data_key: str, prominence: float, distance: int
                              max_step=max_step, width_aware=width_aware)
 
 
+@st.cache_data(show_spinner="Local two-mode fits around λa and λb…")
+def phase_series_cached(_data: SpectraSet, _fits, data_key: str, prominence: float, distance: int,
+                        smooth_window: int, la: float, lb: float, local: bool):
+    # _fits come from phase_fits_cached with the same (data_key, prominence, distance, smooth_window)
+    return phase_series(_data, la, lb, fits=_fits, local=local, smooth_window=smooth_window)
+
+
+def _resid_std(series, col):
+    """Scatter (rad) of a readout column about its straight line against the condition."""
+    ok = series.dropna(subset=[col, "temperature"])
+    if len(ok) < 3:
+        return float("nan")
+    k = np.polyfit(ok["temperature"], ok[col], 1)
+    return float(np.std(ok[col] - np.polyval(k, ok["temperature"])))
+
+
 @st.cache_data(show_spinner="Fitting the phase profile of every spectrum…")
 def phase_fits_cached(_data: SpectraSet, data_key: str, prominence: float, distance: int,
                       smooth_window: int):
@@ -1608,9 +1624,17 @@ with tab_phase:
                                float(np.clip(PAPER_LAMBDA_A, wl_min, wl_max)), 0.5, key="phase_a")
         lb = c[1].number_input("Wavelength b (nm)", wl_min, wl_max,
                                float(np.clip(PAPER_LAMBDA_B, wl_min, wl_max)), 0.5, key="phase_b")
+        phase_local = c[2].toggle(
+            "Local two-mode fit (PTL)", value=True, key="phase_local",
+            help="The manuscript's refinement: around λa and λb the spectrum is fitted to "
+                 "T = t1² + t2² + 2 t1 t2 cos φ(λ) over two fringe cycles, with the cubic's coefficients "
+                 "and t1, t2 (from the nearest maximum and minimum) as fit parameters. Off = the cubic "
+                 "through the numbered extrema alone. Skipped for a wavelength whose window would contain "
+                 "λc or leave the band; the readout then keeps the cubic values.")
         c[2].caption("Defaults are the pair used in the paper (1545 and 1570 nm). The pair scan below "
                      "shows which pair responds most to this run's condition.")
-        ser = phase_series(data, la, lb, fits=fits_p)
+        ser = phase_series_cached(data, fits_p, data_key, prominence, distance, smooth_window,
+                                  float(la), float(lb), bool(phase_local))
         if step_cond is not None:
             # pair the readout with the blanked step condition: the frames recorded while the load was
             # being changed must not enter the fit or the scatter (they would sit at the previous load)
@@ -1630,6 +1654,20 @@ with tab_phase:
             tiles += [(f"Readout per {cond_unit}", f"{sens_p.slope * 1e3:+.1f} mrad",
                        f"± {sens_p.stderr * 1e3:.1f} · R² {sens_p.r_squared:.4f}"),
                       ("Span over the run", f"{sens_p.span_rad:.2f} rad", f"= {sens_p.span_fringes:.2f} fringe")]
+        if phase_local:
+            ok_pct = 100.0 * float(ser["local_ok"].astype(bool).mean()) if len(ser) else 0.0
+            t1 = np.nanmean(ser[["t1_a", "t1_b"]].to_numpy(float))
+            t2 = np.nanmean(ser[["t2_a", "t2_b"]].to_numpy(float))
+            vis = 2 * t1 * t2 / (t1 ** 2 + t2 ** 2) if np.isfinite(t1 + t2) and (t1 ** 2 + t2 ** 2) else np.nan
+            if has_cond and sens_p is not None:
+                r_loc, r_cub = _resid_std(ser, "phase_diff"), _resid_std(ser, "phase_diff_cubic")
+                tiles += [("Local fit vs cubic", f"{r_loc * 1e3:.0f} vs {r_cub * 1e3:.0f} mrad",
+                           f"scatter about the line · {ok_pct:.0f} % of frames refined"),
+                          ("Mode powers t1, t2", f"{t1:.2f}, {t2:.2f}",
+                           f"visibility {vis:.2f} · fit RMS {np.nanmedian(ser['rms_local']):.4f} (T)")]
+            else:
+                tiles += [("Mode powers t1, t2", f"{t1:.2f}, {t2:.2f}",
+                           f"visibility {vis:.2f} · {ok_pct:.0f} % of frames refined")]
         stat_strip(tiles)
         st.plotly_chart(phase_profile_figure(data, fit0_p), width="stretch")
         ser_d = ser.assign(phase_diff=smooth_series(ser["phase_diff"].to_numpy(float), smooth_frames,

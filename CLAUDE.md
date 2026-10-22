@@ -271,6 +271,13 @@ Most sensitive trackable fringe: dip starting at 1542.3 nm, +359.3 ± 0.7 pm/°C
 Its quadratic calibration: RMSE 107 → 49 pm, local sensitivity +414 pm/°C at 22.8 °C and
 +283 pm/°C at 44.1 °C, curvature −6.1 pm/°C². 6 of the 22 good fringes have quadratic RMSE
 < 80 % of linear (those nearest λc); far fringes (e.g. dip@1567.7) are linear within noise.
+PTL local two-mode fit (2026-10-22, `phase.local_fit`, `phase_series(local=True)`, default on in the
+app and the script): readout scatter about its line 1545/1570 25 → 6.6 mrad (0.80 → 0.20 °C),
+1485/1565 21 → 5.5 mrad on the cooldown; strain 1560/1600 60 → 9 mrad (plateau noise 47 → 4);
+t1 ≈ 0.70–0.80, t2 ≈ 0.15–0.21. Two-cycle window (1, 1.5, 2, 3 tried); a window holding λc is
+refused and the frame keeps the cubic for *both* wavelengths (mixing one refined and one cubic
+phase put a ~0.15 rad offset into the readout — that is why 1545/1570 on the strain run stays
+cubic). Manuscript PDF: `~/Downloads/sms_phase_unwrapping_2025_ver5_revised_PTL (1).pdf`.
 Phase unwrapping (SM1E.2) on this run: cubic fits 730/730 spectra (RMS 0.044 rad on the first;
 labelling identical to the paper's Fig. 1: λ−1 peak 1515.7, λc dip 1526.2, λ+1 peak 1534.6), λc =
 1525.2 → 1524.6 nm, +31.0 pm/°C. Readout |φ(1570) − φ(1545)|: −31.6 ± 0.2 mrad/°C, R² 0.980, span
