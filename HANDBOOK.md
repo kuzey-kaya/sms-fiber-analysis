@@ -167,6 +167,12 @@ GitHub's free monthly allowance is limited.
   tracking tabs report pm per gram instead of pm per °C. How much the drawn lines
   are smoothed is yours: *3 · Fringe tracking → Smooth the drawn lines* (frames)
   and *Flatten plateaus*. Untick *Load-step run* for a continuous run.
+- **Phase readout, and how to check the local fit:** on the Phase tab turn on
+  *Compute the phase readout*. The box *How much better is the local fit?* shows
+  the readout computed two ways on the same frames — the cubic through the
+  extrema alone, and with the manuscript's local two-mode fit — with their
+  scatter, resolution and, for a load run, the wobble on the plateaus; the
+  toggle *Local two-mode fit (PTL)* switches the whole tab between the two.
 - **One or several fringes:** on the Fringe tracking tab, *Fringes in detail* shows
   one fringe Igor-style or up to 10 fringes together.
 - **A fringe that flickers** (jumps back and forth between two samples because its

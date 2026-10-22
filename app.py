@@ -327,6 +327,71 @@ def phase_profile_figure(data, fit):
     return fig
 
 
+def _line_fit(series, col):
+    """(slope, intercept, residuals, x, y) of a readout column against the condition."""
+    ok = series.dropna(subset=[col, "temperature"])
+    if len(ok) < 3:
+        return None
+    x, y = ok["temperature"].to_numpy(float), ok[col].to_numpy(float)
+    k = np.polyfit(x, y, 1)
+    return k, y - np.polyval(k, x), x, y, ok["time"].to_numpy(float)
+
+
+def _plateau_noise(values, plateaus, settle=2):
+    """Std (rad) of a per-frame series about its own mean inside every plateau."""
+    parts = []
+    for _, pl in plateaus.iterrows():
+        a, b = int(pl["start"]) + settle, int(pl["end"]) + 1 - settle
+        seg = np.asarray(values[a:b], float)
+        seg = seg[np.isfinite(seg)]
+        if seg.size > 5:
+            parts.append(seg - seg.mean())
+    return float(np.std(np.concatenate(parts))) if parts else float("nan")
+
+
+def phase_compare_table(series, unit, plateaus=None):
+    """Cubic-only vs local-fit readout: slope, R², scatter about the line, resolution, plateau noise."""
+    rows = []
+    for name, col in (("Cubic through the extrema", "phase_diff_cubic"), ("+ local two-mode fit", "phase_diff")):
+        f = _line_fit(series, col)
+        if f is None:
+            continue
+        k, resid, x, y, _ = f
+        r2 = 1 - np.sum(resid ** 2) / np.sum((y - y.mean()) ** 2) if np.ptp(y) else np.nan
+        row = {"method": name, f"slope (mrad/{unit})": k[0] * 1e3, "R²": r2,
+               "scatter (mrad)": np.std(resid) * 1e3,
+               f"resolution ({unit})": np.std(resid) / abs(k[0]) if k[0] else np.nan}
+        if plateaus is not None:
+            row["noise on the plateaus (mrad)"] = _plateau_noise(series[col].to_numpy(float), plateaus) * 1e3
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def phase_compare_figure(series, cond_title, unit):
+    """Both readouts against time (top) and their residuals about their own lines (bottom)."""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.55, 0.45], vertical_spacing=0.08,
+                        subplot_titles=("Readout vs time", "Residual about the straight line vs the condition"),
+                        specs=[[{"secondary_y": True}], [{}]])
+    for name, col, color, width in (("cubic only", "phase_diff_cubic", "#9a9a9a", 1.2),
+                                    ("with local fit", "phase_diff", RED, 1.4)):
+        fig.add_trace(go.Scatter(x=series["time"], y=series[col], mode="lines", name=name,
+                                 line=dict(color=color, width=width)), row=1, col=1, secondary_y=False)
+        f = _line_fit(series, col)
+        if f is not None:
+            k, resid, x, y, t = f
+            fig.add_trace(go.Scatter(x=t, y=resid * 1e3, mode="lines", name=f"{name}: ±{np.std(resid) * 1e3:.1f} mrad",
+                                     line=dict(color=color, width=width)), row=2, col=1)
+    fig.add_trace(go.Scatter(x=series["time"], y=series["temperature"].ffill().bfill(), mode="lines", name=cond_title,
+                             line=dict(color=BLUE, width=1.2, dash="dot")), row=1, col=1, secondary_y=True)
+    fig.update_yaxes(title_text="|φ(λb) − φ(λa)| (rad)", row=1, col=1, secondary_y=False)
+    fig.update_yaxes(title_text=cond_title, color=BLUE, showgrid=False, row=1, col=1, secondary_y=True)
+    fig.update_yaxes(title_text="residual (mrad)", row=2, col=1)
+    fig.update_xaxes(title_text="Time (s)", row=2, col=1)
+    fig.update_layout(height=620, margin=dict(l=10, r=10, t=40, b=10),
+                      legend=dict(orientation="h", y=-0.1, x=0))
+    return fig
+
+
 def phase_readout_figure(series, sens, la, lb, has_cond, cond_title):
     """Readout vs time (Igor colours), vs the condition with its fit, and λc vs the condition."""
     # time on its own full-width row (it has two y-axes), the two condition plots below it
@@ -1675,6 +1740,40 @@ with tab_phase:
         st.caption(f"Readout drawn as {_drawn.replace('as tracked', 'fitted frame by frame')} "
                    "(*Smooth the drawn lines* in the sidebar); the fit and the numbers above use every frame.")
         st.plotly_chart(phase_readout_figure(ser_d, sens_p, la, lb, has_cond, cond_title), width="stretch")
+        if phase_local and has_cond and "phase_diff_cubic" in ser:
+            with st.expander("How much better is the local fit? · cubic vs local, same frames, same pair",
+                             expanded=True, icon=":material/compare:"):
+                cmp = phase_compare_table(ser, cond_unit, _plat)
+                if len(cmp) == 2:
+                    st.dataframe(cmp, hide_index=True, width="stretch",
+                                 column_config={c: st.column_config.NumberColumn(format="%.3f" if c == "R²" else "%.2f")
+                                                for c in cmp.columns if c != "method"})
+                    sc_c, sc_l = cmp["scatter (mrad)"].to_numpy()
+                    better = sc_c / sc_l if sc_l else np.nan
+                    pn = ""
+                    if "noise on the plateaus (mrad)" in cmp:
+                        a, b = cmp["noise on the plateaus (mrad)"].to_numpy()
+                        pn = f" On the load plateaus, where nothing should move, the readout wobbles by {a:.1f} mrad " \
+                             f"with the cubic alone and {b:.1f} mrad with the local fit."
+                    st.markdown(
+                        f"Both rows use the same {int(ser['local_ok'].astype(bool).sum())} frames and the same "
+                        f"wavelengths; only the last step of the algorithm differs. The scatter about the "
+                        f"straight line is **{better:.1f}× smaller** with the local fit, so the smallest "
+                        f"{cond_name.lower()} change it can resolve goes from "
+                        f"{cmp[f'resolution ({cond_unit})'].iloc[0]:.2f} to "
+                        f"{cmp[f'resolution ({cond_unit})'].iloc[1]:.2f} {cond_unit}, while the slope "
+                        f"(the sensitivity) stays within "
+                        f"{abs(cmp[f'slope (mrad/{cond_unit})'].iloc[1] - cmp[f'slope (mrad/{cond_unit})'].iloc[0]):.1f} "
+                        f"mrad/{cond_unit} of the cubic's — the refinement removes noise, not signal.{pn}")
+                    st.plotly_chart(phase_compare_figure(ser, cond_title, cond_unit), width="stretch")
+                    st.caption("Top: the two readouts over the run (grey = cubic only, red = with the local fit). "
+                               "Bottom: what is left after taking each one's own straight line out — the width of "
+                               "that band is the noise of the method. To repeat the check on another run: upload "
+                               "it, open this tab, and compare the two rows; turning the toggle above off shows the "
+                               "cubic-only figures everywhere.")
+                else:
+                    st.info("The local fit could not be applied on enough frames of this pair to compare "
+                            "(a window that holds λc or leaves the band is refused); try a pair on one side of λc.")
         if has_cond:
             with st.expander("Which wavelength pair works best for this run? · what the readout sees"):
                 grid = np.arange(np.ceil(wl_min / 5) * 5 + 5, wl_max - 4, 5.0)

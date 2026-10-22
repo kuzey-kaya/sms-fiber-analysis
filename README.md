@@ -242,6 +242,10 @@ R² 0.80 → 0.994. t₁ ≈ 0.70–0.80 and t₂ ≈ 0.15–0.21 (visibility �
 ≈ 0.003 (cooldown) / 0.01 (strain) in transmittance. A window that would contain
 λc is refused (1545 nm on the strain run, λc ≈ 1530 nm) and that frame keeps the
 cubic values — pick both wavelengths on one side of λc, as the paper does.
+The Phase tab's expander *How much better is the local fit?* puts the two readouts
+of the same frames and pair side by side — slope, R², scatter about the line,
+resolution, and (on a load-step run) the noise on the plateaus — with a figure of
+both readouts and their residuals, so the gain can be checked on any uploaded run.
 
 **Is the implementation right?** Four checks, all in `tests/test_phase.py`:
 

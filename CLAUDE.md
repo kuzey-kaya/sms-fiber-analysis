@@ -277,7 +277,10 @@ app and the script): readout scatter about its line 1545/1570 25 → 6.6 mrad (0
 t1 ≈ 0.70–0.80, t2 ≈ 0.15–0.21. Two-cycle window (1, 1.5, 2, 3 tried); a window holding λc is
 refused and the frame keeps the cubic for *both* wavelengths (mixing one refined and one cubic
 phase put a ~0.15 rad offset into the readout — that is why 1545/1570 on the strain run stays
-cubic). Manuscript PDF: `~/Downloads/sms_phase_unwrapping_2025_ver5_revised_PTL (1).pdf`.
+cubic). Manuscript PDF: `~/Downloads/sms_phase_unwrapping_2025_ver5_revised_PTL (1).pdf`. The app's Phase
+tab has the comparison the advisor can run himself (`phase_compare_table` / `phase_compare_figure`,
+expander "How much better is the local fit?": both readouts on the same frames, scatter, resolution,
+plateau noise; `_plat` passed for load runs).
 Phase unwrapping (SM1E.2) on this run: cubic fits 730/730 spectra (RMS 0.044 rad on the first;
 labelling identical to the paper's Fig. 1: λ−1 peak 1515.7, λc dip 1526.2, λ+1 peak 1534.6), λc =
 1525.2 → 1524.6 nm, +31.0 pm/°C. Readout |φ(1570) − φ(1545)|: −31.6 ± 0.2 mrad/°C, R² 0.980, span

@@ -47,6 +47,13 @@ def test_movie_and_phase_are_computed_on_request_only():
     at.toggle(key="phase_compute").set_value(True).run()
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("λc (first" in m.value for m in at.markdown)          # the phase tiles appeared
+    assert at.toggle(key="phase_local").value                         # local fit on by default
+    cmp = [d.value for d in at.dataframe if "scatter (mrad)" in d.value.columns]
+    assert cmp and len(cmp[0]) == 2
+    assert cmp[0]["scatter (mrad)"].iloc[1] < 0.4 * cmp[0]["scatter (mrad)"].iloc[0]   # the comparison shows it
+    assert any("smaller** with the local fit" in m.value for m in at.markdown)
+    at.toggle(key="phase_local").set_value(False).run()               # cubic only still works
+    assert not at.exception, [str(e.value) for e in at.exception]
 
 
 def test_upload_page_shows_the_format_guide():
