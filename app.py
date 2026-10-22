@@ -1594,7 +1594,8 @@ with tab_track:
             igor_track, igor_title = track_d, cond_title
             if cond_source == "steps" and file_cond is not None:
                 # Igor's graph pairs the peak wavelength with the temperature; offer both axes
-                axis = left.radio("Right axis", [cond_title, f"{file_cond_title} (file column)"],
+                # the advisor's Igor graphs pair the peak wavelength with the temperature: start there
+                axis = left.radio("Right axis", [cond_title, f"{file_cond_title} (file column)"], index=1,
                                   horizontal=True, key=f"igor_axis_{data_key}", label_visibility="collapsed")
                 if axis != cond_title:
                     igor_track, igor_title = track_d.assign(temperature=file_cond), file_cond_title

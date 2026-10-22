@@ -145,7 +145,8 @@ def _check_strain_file(at):
     cmp = [d.value for d in at.dataframe if "scatter (mrad)" in d.value.columns]
     assert cmp and cmp[0]["scatter (mrad)"].iloc[1] < 0.5 * cmp[0]["scatter (mrad)"].iloc[0]
     axis = [r for r in at.radio if r.key and r.key.startswith("igor_axis_")]
-    assert axis and axis[0].set_value(axis[0].options[1]).run() is not None    # temperature on the right axis
+    assert axis and axis[0].value.endswith("(file column)")                    # temperature on the right axis, as in Igor
+    axis[0].set_value(axis[0].options[0]).run()                                # the load works there too
     assert not at.exception, [str(e.value) for e in at.exception]
     at.checkbox(key="smooth_flatten").set_value(True).run()                   # the owner may flatten
     assert not at.exception, [str(e.value) for e in at.exception]
