@@ -35,7 +35,7 @@ from sms_analysis.peaks import smooth
 from sms_analysis.tracking import flicker_fraction, refine_width_fit
 from sms_analysis.io import SpectraSet
 from sms_analysis.movie import frame_rows, render_movie, render_phase_movie
-from sms_analysis.phase import (PAPER_LAMBDA_A, PAPER_LAMBDA_B, phase_fits, phase_sensitivity,
+from sms_analysis.phase import (PAPER_LAMBDA_A, PAPER_LAMBDA_B, local_fit, phase_fits, phase_sensitivity,
                                 phase_series, scan_pairs, tracked_phase_change)
 from sms_analysis.steps import (classify_plateaus, default_step_values, detect_plateaus, robust_jitter,
                                 step_condition)
@@ -1321,6 +1321,10 @@ if len(tracked):
     plateaus = _plateaus_of(step_ref)
 
 
+file_cond = data.temperature.copy() if has_cond else None     # the file's own column (temperature)
+file_cond_title = cond_title
+
+
 def _apply_step_condition(cond: np.ndarray):
     """Swap the condition column of the data and of every track for the step values."""
     global data, tracks, table, tracked, has_cond, step_cond
@@ -1587,9 +1591,16 @@ with tab_track:
             else:
                 right.info(f"Calibration needs a {cond_name.lower()} column.")
         else:
-            left.plotly_chart(igor_figure(track_d, has_cond, cond_title), width="stretch")
-            left.caption("Igor-style view: tracked wavelength (red, left axis) and the condition "
-                         "(blue, right axis) against time.")
+            igor_track, igor_title = track_d, cond_title
+            if cond_source == "steps" and file_cond is not None:
+                # Igor's graph pairs the peak wavelength with the temperature; offer both axes
+                axis = left.radio("Right axis", [cond_title, f"{file_cond_title} (file column)"],
+                                  horizontal=True, key=f"igor_axis_{data_key}", label_visibility="collapsed")
+                if axis != cond_title:
+                    igor_track, igor_title = track_d.assign(temperature=file_cond), file_cond_title
+            left.plotly_chart(igor_figure(igor_track, has_cond, igor_title), width="stretch")
+            left.caption("Igor-style view: tracked wavelength (red, left axis) and "
+                         f"{igor_title} (blue, right axis) against time.")
         if len(chosen) == 1 and has_cond:
             try:
                 fit = fit_sensitivity(track)
@@ -1684,11 +1695,33 @@ with tab_phase:
                 "the prominence.")
     else:
         wl_min, wl_max = float(data.wavelengths.min()), float(data.wavelengths.max())
+        pair_key = f"phase_pair_{data_key}"
+        if pair_key not in st.session_state:
+            # The paper's 1545/1570 nm, unless the local fit cannot work there on this run (a window
+            # holding λc or leaving the band): then 25 and 50 nm to the right of λc, or to the left.
+            i0 = next(i for i, f in enumerate(fits_p) if f is not None)
+            lam_c = fit0_p.lambda_c if np.isfinite(fit0_p.lambda_c) else 0.5 * (wl_min + wl_max)
+
+            def works(a, b):
+                return (wl_min <= a < b <= wl_max and
+                        local_fit(data.wavelengths, data.spectra[i0], fit0_p, a) is not None and
+                        local_fit(data.wavelengths, data.spectra[i0], fit0_p, b) is not None)
+
+            # the paper's pair first; else walk outward from λc on a 5 nm grid, right side then left,
+            # and take the first wavelength whose local fit works, with its partner 25 nm further out
+            cands = [(PAPER_LAMBDA_A, PAPER_LAMBDA_B)]
+            cands += [(a_, a_ + 25.0) for a_ in np.arange(5 * np.ceil((lam_c + 15) / 5), wl_max - 25, 5.0)]
+            cands += [(b_ - 25.0, b_) for b_ in np.arange(5 * np.floor((lam_c - 15) / 5), wl_min + 25, -5.0)]
+            chosen_pair = next((c_ for c_ in cands if works(*c_)), cands[0])
+            st.session_state[pair_key] = (float(np.clip(chosen_pair[0], wl_min, wl_max)),
+                                          float(np.clip(chosen_pair[1], wl_min, wl_max)))
+            st.session_state["phase_a"], st.session_state["phase_b"] = st.session_state[pair_key]
         c = st.columns([1.2, 1.2, 2])
-        la = c[0].number_input("Wavelength a (nm)", wl_min, wl_max,
-                               float(np.clip(PAPER_LAMBDA_A, wl_min, wl_max)), 0.5, key="phase_a")
-        lb = c[1].number_input("Wavelength b (nm)", wl_min, wl_max,
-                               float(np.clip(PAPER_LAMBDA_B, wl_min, wl_max)), 0.5, key="phase_b")
+        la = c[0].number_input("Wavelength a (nm)", wl_min, wl_max, step=0.5, key="phase_a")
+        lb = c[1].number_input("Wavelength b (nm)", wl_min, wl_max, step=0.5, key="phase_b")
+        if tuple(st.session_state[pair_key]) != (PAPER_LAMBDA_A, PAPER_LAMBDA_B) and (la, lb) == tuple(st.session_state[pair_key]):
+            c[2].caption(f"Pair moved to {la:g}/{lb:g} nm: the paper's 1545/1570 nm straddles this run's "
+                         f"λc ≈ {fit0_p.lambda_c:.0f} nm, where the local fit cannot be anchored.")
         phase_local = c[2].toggle(
             "Local two-mode fit (PTL)", value=True, key="phase_local",
             help="The manuscript's refinement: around λa and λb the spectrum is fitted to "
@@ -1696,7 +1729,7 @@ with tab_phase:
                  "and t1, t2 (from the nearest maximum and minimum) as fit parameters. Off = the cubic "
                  "through the numbered extrema alone. Skipped for a wavelength whose window would contain "
                  "λc or leave the band; the readout then keeps the cubic values.")
-        c[2].caption("Defaults are the pair used in the paper (1545 and 1570 nm). The pair scan below "
+        c[2].caption("The paper uses 1545 and 1570 nm; pick both on one side of λc. The pair scan below "
                      "shows which pair responds most to this run's condition.")
         ser = phase_series_cached(data, fits_p, data_key, prominence, distance, smooth_window,
                                   float(la), float(lb), bool(phase_local))

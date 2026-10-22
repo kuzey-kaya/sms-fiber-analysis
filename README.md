@@ -240,8 +240,15 @@ it off); the series keeps the cubic values in `phase_diff_cubic`. Measured
 mrad; strain run 1560/1600 nm 60 → 9 mrad, within-plateau noise 47 → 4 mrad,
 R² 0.80 → 0.994. t₁ ≈ 0.70–0.80 and t₂ ≈ 0.15–0.21 (visibility ≈ 0.5), fit RMS
 ≈ 0.003 (cooldown) / 0.01 (strain) in transmittance. A window that would contain
-λc is refused (1545 nm on the strain run, λc ≈ 1530 nm) and that frame keeps the
-cubic values — pick both wavelengths on one side of λc, as the paper does.
+λc, or comes within half a fringe period of it, is refused (1545 nm on the strain
+run, λc ≈ 1522 nm) and that frame keeps the cubic values. The Phase tab therefore
+moves the default pair when the paper's 1545/1570 nm cannot be refined on a run:
+it walks outward from λc on a 5 nm grid (right side first) to the first
+wavelength the local fit accepts and takes its partner 25 nm further out — on the
+strain run 1560/1585 nm, where the noise on the load plateaus is 3.4 mrad with
+the local fit against 23.7 mrad with the cubic alone. The Igor-style view of the
+Fringe tracking tab can put the file's temperature on the right axis instead of
+the load, as the advisor's Igor graph does.
 The Phase tab's expander *How much better is the local fit?* puts the two readouts
 of the same frames and pair side by side — slope, R², scatter about the line,
 resolution, and (on a load-step run) the noise on the plateaus — with a figure of

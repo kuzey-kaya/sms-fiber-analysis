@@ -274,8 +274,13 @@ Its quadratic calibration: RMSE 107 → 49 pm, local sensitivity +414 pm/°C at 
 PTL local two-mode fit (2026-10-22, `phase.local_fit`, `phase_series(local=True)`, default on in the
 app and the script): readout scatter about its line 1545/1570 25 → 6.6 mrad (0.80 → 0.20 °C),
 1485/1565 21 → 5.5 mrad on the cooldown; strain 1560/1600 60 → 9 mrad (plateau noise 47 → 4);
-t1 ≈ 0.70–0.80, t2 ≈ 0.15–0.21. Two-cycle window (1, 1.5, 2, 3 tried); a window holding λc is
-refused and the frame keeps the cubic for *both* wavelengths (mixing one refined and one cubic
+t1 ≈ 0.70–0.80, t2 ≈ 0.15–0.21. Two-cycle window (1, 1.5, 2, 3 tried); a window holding λc *or starting within half a period of
+it* is refused (strain run: 1555 nm, edge 0.17 period from λc, doubled the plateau noise; 1560 nm
+at 0.57 period cut it 7-fold; cooldown 1545 nm sits at 1.0 period and stays valid) and the frame
+keeps the cubic for *both* wavelengths; the app's default pair (`phase_pair_<key>`) walks outward
+from λc when the paper's pair is refused (strain → 1560/1585), and the Igor view offers the file's
+temperature (`file_cond`) on the right axis (`igor_axis_<key>`) — the owner compared our phase
+plot with Igor's "peakmin1555 vs timemin1555" graph (mixing one refined and one cubic
 phase put a ~0.15 rad offset into the readout — that is why 1545/1570 on the strain run stays
 cubic). Manuscript PDF: `~/Downloads/sms_phase_unwrapping_2025_ver5_revised_PTL (1).pdf`. The app's Phase
 tab has the comparison the advisor can run himself (`phase_compare_table` / `phase_compare_figure`,

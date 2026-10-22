@@ -139,6 +139,14 @@ def _check_strain_file(at):
     at.toggle(key="phase_compute").set_value(True).run()                      # readout drawn smoothed
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("Readout drawn as 9-frame median" in c.value for c in at.caption)
+    pa, pb = at.session_state["phase_a"], at.session_state["phase_b"]
+    assert (pa, pb) != (1545.0, 1570.0) and 1540 <= pa < pb <= 1600               # moved right of λc ≈ 1522
+    assert any("Pair moved to" in c.value for c in at.caption)
+    cmp = [d.value for d in at.dataframe if "scatter (mrad)" in d.value.columns]
+    assert cmp and cmp[0]["scatter (mrad)"].iloc[1] < 0.5 * cmp[0]["scatter (mrad)"].iloc[0]
+    axis = [r for r in at.radio if r.key and r.key.startswith("igor_axis_")]
+    assert axis and axis[0].set_value(axis[0].options[1]).run() is not None    # temperature on the right axis
+    assert not at.exception, [str(e.value) for e in at.exception]
     at.checkbox(key="smooth_flatten").set_value(True).run()                   # the owner may flatten
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("Readout drawn as plateau averages" in c.value for c in at.caption)

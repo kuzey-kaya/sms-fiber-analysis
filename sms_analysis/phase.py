@@ -234,10 +234,10 @@ def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam:
     slope at ``lam``), never less than one full cycle, and shrinks to one cycle when it would
     leave the band; t1 and t2 start from the nearest maximum and minimum inside it; the four
     cubic coefficients start from the global fit re-centred at ``lam``.  Returns None when
-    even a one-cycle window leaves the band, when the window would contain λc (the two-mode
-    model is still right there, but the phase has its extremum inside the window and the fit
-    is not anchored — the readout then keeps the cubic value), or when the cubic's slope
-    vanishes at ``lam``.
+    even a one-cycle window leaves the band, when the window would come within half a period
+    of λc (the two-mode model is still right there, but the phase has its extremum next to the
+    window and the fit is not anchored — the readout then keeps the cubic values), or when the
+    cubic's slope vanishes at ``lam``.
     """
     from scipy.optimize import least_squares
 
@@ -256,7 +256,10 @@ def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam:
         lo, hi = lam - half, lam + half
         if lo < wl.min() or hi > wl.max():
             return None
-    if np.isfinite(fit.lambda_c) and lo <= fit.lambda_c <= hi:
+    # a window that holds λc, or starts within half a period of it, is not anchored: the phase
+    # has its extremum there and the fit drifts (checked on the strain run: 1555 nm with the edge
+    # 0.17 period from λc doubled the plateau noise, 1560 nm at 0.57 period cut it 7-fold)
+    if np.isfinite(fit.lambda_c) and (lo - 0.5 * period) <= fit.lambda_c <= (hi + 0.5 * period):
         return None
     m = (wl >= lo) & (wl <= hi)
     if m.sum() < 12:
