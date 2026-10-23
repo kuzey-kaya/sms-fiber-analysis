@@ -1241,7 +1241,7 @@ if st.session_state.get(applied_key) != is_steps:
     use_width = is_steps or st.session_state.get(f"width_guess_{data_key}", False)
     st.session_state["track_mode"] = TRACK_MODES[1] if use_width else TRACK_MODES[0]
     st.session_state["reject_jumps"] = not is_steps
-    st.session_state["smooth_frames"] = 9 if is_steps else 1       # the owner decides how much
+    st.session_state["smooth_frames"] = 9 if is_steps else 5       # the owner decides how much
     st.session_state["smooth_flatten"] = False
 with st.sidebar.expander("3 · Fringe tracking", expanded=False):
     track_mode = st.radio(
@@ -1676,36 +1676,62 @@ with tab_igor:
                 "samples inside the range are used; the tracker of the other tabs plays no part here.")
     wl_min_i, wl_max_i = float(data.wavelengths.min()), float(data.wavelengths.max())
     n_pts = len(data.wavelengths)
+    step_nm = float(np.median(np.diff(data.wavelengths)))
     fk = f"fp_{data_key}"
-    c = st.columns([1.3, 1, 1, 1])
-    how = c[0].radio("Range given as", ["Wavelengths (nm)", "Igor point numbers"], horizontal=True,
-                     key=f"{fk}_how", help="Igor's /R=[startP,endP] counts samples from 0; the advisor's "
-                                           "calls use 735–766 and 274–353 on the 2026-10-15 file.")
-    kind_fp = c[1].radio("Look for", ["Minimum (/N)", "Maximum"], key=f"{fk}_kind", horizontal=True)
-    box_fp = c[2].slider("Box (/B, samples)", 1, 21, 5, 2, key=f"{fk}_box",
-                         help="Sliding-average width before the derivative; 1 = none (Igor's default box is 5).")
-    use_min = c[3].checkbox("Min level (/M)", key=f"{fk}_usem")
-    min_level = c[3].number_input("level", 0.0, 2.0, 0.5, 0.01, key=f"{fk}_m",
-                                  label_visibility="collapsed") if use_min else None
-    if how == "Igor point numbers":
-        pc = st.columns([1, 1, 3])
-        p_a = pc[0].number_input("start point", 0, n_pts - 1, min(735, n_pts - 2), key=f"{fk}_pa")
-        p_b = pc[1].number_input("end point", 0, n_pts - 1, min(766, n_pts - 1), key=f"{fk}_pb")
-        a_fp, b_fp = points_to_nm(data, int(p_a), int(p_b))
-        pc[2].caption(f"points {int(p_a)}–{int(p_b)} of this file = {a_fp:.1f}–{b_fp:.1f} nm "
-                      f"(sample step {np.median(np.diff(data.wavelengths)):.2f} nm)")
+    # One choice is enough: the fringe. Its range (the whole excursion plus a margin), its kind
+    # (peak or dip) and the box (a quarter of the fringe's half period) follow from it; everything
+    # can still be set by hand underneath, including Igor's point numbers.
+    labels_fp = list(table["fringe"])
+    d0 = pick_default(table, tracked, has_cond) if len(table) else None
+    lock_fp = table.set_index("fringe")["locked_pct"] if len(table) else {}
+    c = st.columns([2, 1.2])
+    pick = c[0].selectbox("Fringe", labels_fp, index=labels_fp.index(d0) if d0 in labels_fp else 0,
+                          key=f"{fk}_pick",
+                          format_func=lambda k: f"{k} nm · locked {lock_fp[k]:.0f}% ({k.split('@')[0]})",
+                          help="The range, the kind (minimum/maximum) and the box width are set from this "
+                               "fringe; open *Set by hand* below to change them, or to type Igor point numbers.")
+    if pick and np.isfinite(tracks[pick]["wavelength"]).any():
+        w_lo, w_hi = float(np.nanmin(tracks[pick]["wavelength"])), float(np.nanmax(tracks[pick]["wavelength"]))
     else:
-        d0 = pick_default(table, tracked, has_cond) if len(table) else None
-        if d0 and np.isfinite(tracks[d0]["wavelength"]).any():
-            w_lo, w_hi = np.nanmin(tracks[d0]["wavelength"]), np.nanmax(tracks[d0]["wavelength"])
+        w_lo = w_hi = 0.5 * (wl_min_i + wl_max_i)
+    auto_a, auto_b = float(max(wl_min_i, w_lo - 1.5)), float(min(wl_max_i, w_hi + 1.5))
+    auto_neg = (pick or "dip").startswith("dip")
+    # half period of this fringe in the first spectrum → box = a quarter of it, 5…41 samples, odd
+    pos_fp = np.sort(np.r_[table["start_nm"].to_numpy(float)])
+    i_fp = int(np.argmin(np.abs(pos_fp - float(pick.split("@")[1])))) if pick else 0
+    gaps = [abs(pos_fp[i_fp] - pos_fp[j]) for j in (i_fp - 1, i_fp + 1) if 0 <= j < pos_fp.size]
+    half_nm = float(min(gaps)) if gaps else 5.0
+    auto_box = int(np.clip(int(0.25 * half_nm / step_nm) | 1, 5, 41))
+    with st.expander("Set by hand (range, kind, box, Igor's /M, or Igor point numbers)", expanded=False):
+        h = st.columns([1.3, 1, 1.2, 1])
+        how = h[0].radio("Range given as", ["From the fringe", "Wavelengths (nm)", "Igor point numbers"],
+                         key=f"{fk}_how", help="Igor's /R=[startP,endP] counts samples from 0; the advisor's "
+                                               "calls use 735–766 and 274–353 on the 2026-10-15 file.")
+        kind_fp = h[1].radio("Look for", ["From the fringe", "Minimum (/N)", "Maximum"], key=f"{fk}_kind")
+        box_mode = h[2].radio("Box (/B)", ["Auto (¼ half period)", "Set"], key=f"{fk}_boxmode")
+        box_set = h[2].slider("samples", 1, 41, 5, 2, key=f"{fk}_box", disabled=box_mode != "Set",
+                              label_visibility="collapsed")
+        use_min = h[3].checkbox("Min level (/M)", key=f"{fk}_usem")
+        min_level = h[3].number_input("level", 0.0, 2.0, 0.5, 0.01, key=f"{fk}_m",
+                                      label_visibility="collapsed") if use_min else None
+        if how == "Igor point numbers":
+            pc = st.columns([1, 1, 3])
+            p_a = pc[0].number_input("start point", 0, n_pts - 1, min(735, n_pts - 2), key=f"{fk}_pa")
+            p_b = pc[1].number_input("end point", 0, n_pts - 1, min(766, n_pts - 1), key=f"{fk}_pb")
+            a_fp, b_fp = points_to_nm(data, int(p_a), int(p_b))
+            pc[2].caption(f"points {int(p_a)}–{int(p_b)} of this file = {a_fp:.1f}–{b_fp:.1f} nm "
+                          f"(sample step {step_nm:.2f} nm)")
+        elif how == "Wavelengths (nm)":
+            a_fp, b_fp = st.slider("Range (nm)", wl_min_i, wl_max_i, (auto_a, auto_b), 0.1, key=f"{fk}_rng",
+                                   help="Drag the ends; the peak must stay inside it for the whole run.")
         else:
-            w_lo = w_hi = 0.5 * (wl_min_i + wl_max_i)
-        a_fp, b_fp = st.slider("Range (nm)", wl_min_i, wl_max_i,
-                               (float(max(wl_min_i, w_lo - 1.5)), float(min(wl_max_i, w_hi + 1.5))), 0.1,
-                               key=f"{fk}_rng",
-                               help="Drag the ends; the peak must stay inside it for the whole run. The default "
-                                    f"covers the whole excursion of {d0} plus 1.5 nm on each side.")
-    neg = kind_fp.startswith("Min")
+            a_fp, b_fp = auto_a, auto_b
+    neg = auto_neg if kind_fp == "From the fringe" else kind_fp.startswith("Min")
+    box_fp = auto_box if box_mode.startswith("Auto") else int(box_set)
+    st.caption(f"FindPeak /R=({a_fp:.1f},{b_fp:.1f}) /B={box_fp}{' /N' if neg else ''}"
+               f"{f' /M={min_level}' if min_level is not None else ''} on every spectrum"
+               + (f" — box = ¼ of {pick}'s half period ({half_nm:.1f} nm = {half_nm / step_nm:.0f} samples)"
+                  if box_mode.startswith("Auto") else ""))
     fp = findpeak_cached(data, data_key, float(a_fp), float(b_fp), int(box_fp), neg, min_level)
     found = float(fp["found"].mean() * 100)
     w_fp = fp["wavelength"].to_numpy(float)

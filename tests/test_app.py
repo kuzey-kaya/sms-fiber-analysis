@@ -159,6 +159,11 @@ def _check_strain_file(at):
     at.checkbox(key="smooth_flatten").set_value(False).run()                  # or not smooth at all
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("Lines drawn: as tracked" in c.value for c in at.caption)
+    fp_pick = [sb for sb in at.selectbox if sb.label == "Fringe"]              # FindPeak: pick a fringe, done
+    assert fp_pick and any("FindPeak /R=(" in c.value and "/N" in c.value for c in at.caption)
+    fp_pick[0].set_value("dip@1574.0").run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("FindPeak /R=(1572." in c.value for c in at.caption)
     at.radio(key="detail_mode").set_value("One fringe (Igor style)").run()
     assert not at.exception
     at.radio(key="movie_kind").set_value("Spectra and fringes").run()

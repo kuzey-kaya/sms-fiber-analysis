@@ -111,10 +111,17 @@ It is a continuous cooldown — no setpoint steps.
   1479.8–1495.6 ("min1489"). Results: 1576 dip 1574.0 → 1576.6 nm, plateau noise 80/24/12 pm at box
   1/5/11; cooldown peak 1490–1497 nm → −141 pm/°C (box 5: resid 38 pm, box 11: 19 pm). Difference
   between the files at equal settings = 6× spectral noise (0.008 vs 0.0013) and 0.2 vs 0.1 nm
-  sampling. App tab "FindPeak (Igor)" (`tab_igor`, `findpeak_cached`, keys `fp_<data_key>_*`,
-  range in nm or Igor points, Igor-style figure via `igor_figure`, FringeLab's tracker on the same
-  fringe quoted underneath); CLI `scripts/igor_findpeak.py --range/--points --min/--max --box`;
-  tests `tests/test_findpeak.py`.
+  sampling. App tab "FindPeak (Igor)" (`tab_igor`, `findpeak_cached`, keys `fp_<data_key>_*`):
+  2026-10-23 the owner asked for Igor-easy use — one `selectbox` "Fringe" (`fp_<key>_pick`, default
+  `pick_default`) sets the range (the fringe's whole excursion ± 1.5 nm), the kind (dip → /N) and an
+  automatic box = ¼ of the fringe's half period in samples (odd, 5…41; on the strain run box 5 → auto
+  17/15/9/11 cut the plateau noise 84 → 31, 36 → 19, 24 → 14, 29 → 17 pm on dip@1491/1552/1574,
+  peak@1565; FringeLab's width fit stays lower, 20/13/8/10 pm). The expander "Set by hand" keeps
+  range in nm or Igor point numbers, kind, box slider, /M; a caption prints the equivalent
+  `FindPeak /R=(a,b) /B=… /N`. Igor-style figure via `igor_figure`, FringeLab's tracker on the same
+  fringe quoted underneath. CLI `scripts/igor_findpeak.py --range/--points --min/--max --box`;
+  tests `tests/test_findpeak.py`, `test_app.py::_check_strain_file`. Same day: the drawn-lines
+  default on a continuous run went 1 → 5 frames (step runs stay at 9), fits untouched.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,

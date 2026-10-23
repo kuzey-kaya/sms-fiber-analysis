@@ -140,10 +140,12 @@ re-implemented (`sms_analysis/findpeak.py`: box-smoothed wave, peak centre at th
 zero crossing of the first derivative with linear interpolation, edges at the
 second derivative's zero crossings, `/N` minimum, `/M` level, `/R` range and
 search direction, peak value from the two raw samples) and run the group's way:
-one fixed range on every spectrum, nothing but the samples inside it. The range
-is set by hand — in nm, or as Igor point numbers so the advisor's calls
-(`trackpeaknew(…, "min1576a", …, 735, 766, -1)`) can be typed in as they are — with
-the box width and the min/max choice next to it; the result is the Igor graph
+one fixed range on every spectrum, nothing but the samples inside it. One choice:
+the fringe, from a list — its range (the whole excursion plus 1.5 nm), its kind
+(minimum/maximum) and the box width (a quarter of its half period, 5–41 samples)
+follow from it. *Set by hand* underneath takes a range in nm or as Igor point
+numbers, so the advisor's calls (`trackpeaknew(…, "min1576a", …, 735, 766, -1)`)
+can be typed in as they are, plus the box and `/M`; the result is the Igor graph
 (V_PeakLoc red, condition blue) with found-%, sensitivity and, on a load run,
 the noise on the plateaus, plus FringeLab's own tracker on the same fringe for
 comparison. Script: `python scripts/igor_findpeak.py data/strain.csv --points 735 766 --min`.
@@ -158,7 +160,7 @@ is what brings both to the same footing.
 
 **Adjustable smoothing of the drawn lines.** *3 · Fringe tracking → Smooth the
 drawn lines (frames)* is a running median over 1 (as tracked) to 61 frames — a
-load-step run starts at 9, a continuous run at 1 — and *Flatten plateaus* turns
+load-step run starts at 9, a continuous run at 5 — and *Flatten plateaus* turns
 a load-step run into Igor's clean staircase (one mean per plateau). Both act only
 on what is *drawn* (shift plot, Igor view, calibration scatter, movie panel, Phase
 readout); every fit uses the locked frames as tracked, and the status line under
