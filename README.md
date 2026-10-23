@@ -125,6 +125,27 @@ so the sensitivity comes out per gram — Igor's *shift vs mass*. On the strain
 file (assuming 50 g steps): dip@1552.8 +11.8 pm/g, dip@1491.1 −18.4 pm/g,
 R² ≈ 0.99; the unloaded level drifts +0.22 nm over the run with the temperature.
 
+**FindPeak (Igor) tab — the advisor's own procedure.** Igor Pro's `FindPeak`
+re-implemented (`sms_analysis/findpeak.py`: box-smoothed wave, peak centre at the
+zero crossing of the first derivative with linear interpolation, edges at the
+second derivative's zero crossings, `/N` minimum, `/M` level, `/R` range and
+search direction, peak value from the two raw samples) and run the group's way:
+one fixed range on every spectrum, nothing but the samples inside it. The range
+is set by hand — in nm, or as Igor point numbers so the advisor's calls
+(`trackpeaknew(…, "min1576a", …, 735, 766, -1)`) can be typed in as they are — with
+the box width and the min/max choice next to it; the result is the Igor graph
+(V_PeakLoc red, condition blue) with found-%, sensitivity and, on a load run,
+the noise on the plateaus, plus FringeLab's own tracker on the same fringe for
+comparison. Script: `python scripts/igor_findpeak.py data/strain.csv --points 735 766 --min`.
+Checked 2026-10-23: points 735–766 of the strain file = 1572.0–1578.2 nm, the
+1576 nm dip steps 1574.0 → 1576.6 nm exactly as on the advisor's screen (plateau
+noise 24 pm at box 5, 80 pm unsmoothed, 12 pm at box 11); the cooldown's 1493 nm
+peak in 1490–1497 nm gives −141 pm/°C, the published number. Why the two files
+look different at the same settings: the strain spectra are 6× noisier
+(0.008 vs 0.0013 in transmittance) and sampled at 0.2 instead of 0.1 nm, so a
+zero crossing of the derivative wanders more — box smoothing of 5–11 samples
+is what brings both to the same footing.
+
 **Adjustable smoothing of the drawn lines.** *3 · Fringe tracking → Smooth the
 drawn lines (frames)* is a running median over 1 (as tracked) to 61 frames — a
 load-step run starts at 9, a continuous run at 1 — and *Flatten plateaus* turns

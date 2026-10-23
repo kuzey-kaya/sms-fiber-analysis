@@ -167,6 +167,10 @@ GitHub's free monthly allowance is limited.
   tracking tabs report pm per gram instead of pm per °C. How much the drawn lines
   are smoothed is yours: *3 · Fringe tracking → Smooth the drawn lines* (frames)
   and *Flatten plateaus*. Untick *Load-step run* for a continuous run.
+- **FindPeak (Igor) tab:** Igor's `FindPeak` on one fixed range, exactly as the
+  group's `trackpeaknew` does it. Type the range in nm or as Igor point numbers
+  (e.g. 735 and 766), choose minimum/maximum and the box width; you get the Igor
+  graph and a CSV. Use it to compare FringeLab with Igor on the same spectra.
 - **Phase readout, and how to check the local fit:** on the Phase tab turn on
   *Compute the phase readout*. The box *How much better is the local fit?* shows
   the readout computed two ways on the same frames — the cubic through the

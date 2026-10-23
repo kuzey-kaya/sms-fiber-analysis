@@ -31,6 +31,7 @@ from plotly.subplots import make_subplots
 
 from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_sms_csv,
                           track_all_extrema)
+from sms_analysis.findpeak import points_to_nm, track_findpeak
 from sms_analysis.peaks import smooth
 from sms_analysis.tracking import flicker_fraction, refine_width_fit
 from sms_analysis.io import SpectraSet
@@ -1463,9 +1464,10 @@ if not has_cond:
 y_modes = ["Time", "Spectrum number"] + (["Condition"] if has_cond else [])
 y_label = {"Time": "Time", "Spectrum number": "Spectrum number", "Condition": cond_name}.get
 
-tab_map, tab_spec, tab_track, tab_sens, tab_phase, tab_3d, tab_movie, tab_export = st.tabs(
+tab_map, tab_spec, tab_track, tab_igor, tab_sens, tab_phase, tab_3d, tab_movie, tab_export = st.tabs(
     [":material/gradient: Spectral map", ":material/show_chart: Spectrum & peaks",
-     ":material/timeline: Fringe tracking", ":material/thermostat: Sensitivity",
+     ":material/timeline: Fringe tracking", ":material/straighten: FindPeak (Igor)",
+     ":material/thermostat: Sensitivity",
      ":material/waves: Phase", ":material/view_in_ar: 3-D view", ":material/movie: Movie",
      ":material/download: Export"])
 
@@ -1627,6 +1629,99 @@ with tab_track:
                 right.info("Too few locked points to fit this fringe.")
         elif len(chosen) == 1:
             right.info(f"Calibration needs a {cond_name.lower()} column.")
+
+# ---- FindPeak (Igor): one fixed range, Igor's own peak finder, nothing else ------------------
+@st.cache_data(show_spinner=False)
+def findpeak_cached(_data: SpectraSet, data_key: str, a: float, b: float, box: int, negative: bool,
+                    min_level):
+    return track_findpeak(_data, a, b, box=box, negative=negative, min_level=min_level)
+
+
+with tab_igor:
+    st.markdown("**Igor Pro's `FindPeak`, run the way the group's procedure runs it**: the same fixed "
+                "wavelength range on every spectrum, the wave box-smoothed, the peak centre where the "
+                "derivative crosses zero (`/N` for a minimum), the peak value from the two raw samples "
+                "around it — `trackpeaknew(\"n\", …, \"min1576a\", temp, tim, 735, 766, -1)`. Only the "
+                "samples inside the range are used; the tracker of the other tabs plays no part here.")
+    wl_min_i, wl_max_i = float(data.wavelengths.min()), float(data.wavelengths.max())
+    n_pts = len(data.wavelengths)
+    fk = f"fp_{data_key}"
+    c = st.columns([1.3, 1, 1, 1])
+    how = c[0].radio("Range given as", ["Wavelengths (nm)", "Igor point numbers"], horizontal=True,
+                     key=f"{fk}_how", help="Igor's /R=[startP,endP] counts samples from 0; the advisor's "
+                                           "calls use 735–766 and 274–353 on the 2026-10-15 file.")
+    kind_fp = c[1].radio("Look for", ["Minimum (/N)", "Maximum"], key=f"{fk}_kind", horizontal=True)
+    box_fp = c[2].slider("Box (/B, samples)", 1, 21, 5, 2, key=f"{fk}_box",
+                         help="Sliding-average width before the derivative; 1 = none (Igor's default box is 5).")
+    use_min = c[3].checkbox("Min level (/M)", key=f"{fk}_usem")
+    min_level = c[3].number_input("level", 0.0, 2.0, 0.5, 0.01, key=f"{fk}_m",
+                                  label_visibility="collapsed") if use_min else None
+    if how == "Igor point numbers":
+        pc = st.columns([1, 1, 3])
+        p_a = pc[0].number_input("start point", 0, n_pts - 1, min(735, n_pts - 2), key=f"{fk}_pa")
+        p_b = pc[1].number_input("end point", 0, n_pts - 1, min(766, n_pts - 1), key=f"{fk}_pb")
+        a_fp, b_fp = points_to_nm(data, int(p_a), int(p_b))
+        pc[2].caption(f"points {int(p_a)}–{int(p_b)} of this file = {a_fp:.1f}–{b_fp:.1f} nm "
+                      f"(sample step {np.median(np.diff(data.wavelengths)):.2f} nm)")
+    else:
+        d0 = pick_default(table, tracked, has_cond) if len(table) else None
+        w0 = float(d0.split("@")[1]) if d0 else 0.5 * (wl_min_i + wl_max_i)
+        a_fp, b_fp = st.slider("Range (nm)", wl_min_i, wl_max_i,
+                               (float(max(wl_min_i, w0 - 3.0)), float(min(wl_max_i, w0 + 3.0))), 0.1,
+                               key=f"{fk}_rng", help="Drag the ends; the peak must stay inside it for the whole run.")
+    neg = kind_fp.startswith("Min")
+    fp = findpeak_cached(data, data_key, float(a_fp), float(b_fp), int(box_fp), neg, min_level)
+    found = float(fp["found"].mean() * 100)
+    w_fp = fp["wavelength"].to_numpy(float)
+    tiles = [("Range", f"{a_fp:.1f}–{b_fp:.1f} nm", f"{int(((data.wavelengths >= min(a_fp, b_fp)) & (data.wavelengths <= max(a_fp, b_fp))).sum())} samples per spectrum"),
+             ("Found", f"{found:.0f} %", "spectra with a peak inside the range"),
+             ("Peak wavelength", f"{np.nanmin(w_fp):.2f} → {np.nanmax(w_fp):.2f} nm" if np.isfinite(w_fp).any() else "—",
+              f"width {np.nanmedian(fp['width']):.1f} nm (median)")]
+    fp_fit = None
+    if has_cond and np.isfinite(w_fp).sum() >= 3:
+        try:
+            fp_fit = fit_sensitivity(fp.assign(temperature=step_cond if step_cond is not None else data.temperature))
+            tiles.append((f"Sensitivity (pm/{cond_unit})", f"{fp_fit.slope * 1e3:+.1f}",
+                          f"± {fp_fit.stderr * 1e3:.1f} · R² {fp_fit.r_squared:.4f}"))
+        except ValueError:
+            fp_fit = None
+    if _plat is not None and np.isfinite(w_fp).any():
+        tiles.append(("Noise on the plateaus", f"{_plateau_noise(w_fp, _plat) * 1e3:.0f} pm",
+                      "std inside the load steps"))
+    stat_strip(tiles)
+    igor_fp = fp.assign(wavelength=smooth_series(w_fp, smooth_frames, smooth_flatten, _plat))
+    if cond_source == "steps" and file_cond is not None:
+        ax_fp = st.radio("Right axis", [cond_title, f"{file_cond_title} (file column)"], index=1, horizontal=True,
+                         key=f"{fk}_axis", label_visibility="collapsed")
+        if ax_fp != cond_title:
+            igor_fp = igor_fp.assign(temperature=file_cond)
+            igor_title_fp = file_cond_title
+        else:
+            igor_title_fp = cond_title
+    else:
+        igor_title_fp = cond_title
+    st.plotly_chart(igor_figure(igor_fp, has_cond, igor_title_fp), width="stretch")
+    st.caption(f"Igor's graph: V_PeakLoc (red, left) and {igor_title_fp} (blue, right) against time; "
+               f"lines drawn {_drawn}. A frame whose range holds no such extremum is a gap — widen the "
+               "range or move it when that happens, as in Igor.")
+    # the same fringe with FringeLab's tracker, for the record
+    near = [k for k in table["fringe"] if min(a_fp, b_fp) <= float(k.split("@")[1]) <= max(a_fp, b_fp)
+            and k.startswith("dip" if neg else "peak")]
+    if near:
+        k = near[0]
+        w_fl = tracks[k]["wavelength"].to_numpy(float)
+        line = f"FringeLab's tracker on the same fringe ({k}): locked {100 * np.isfinite(w_fl).mean():.0f} %"
+        if _plat is not None:
+            line += f", noise on the plateaus {_plateau_noise(w_fl, _plat) * 1e3:.0f} pm"
+        elif has_cond:
+            try:
+                f_fl = fit_sensitivity(tracks[k])
+                line += f", {f_fl.slope * 1e3:+.1f} pm/{cond_unit}, R² {f_fl.r_squared:.4f}"
+            except ValueError:
+                pass
+        st.caption(line + ".")
+    st.download_button("FindPeak track (CSV)", fp.to_csv(index=False), f"{Path(file_name).stem}_findpeak.csv",
+                       "text/csv", key=f"{fk}_dl")
 
 # ---- sensitivity ----------------------------------------------------------
 with tab_sens:

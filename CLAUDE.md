@@ -80,6 +80,23 @@ It is a continuous cooldown — no setpoint steps.
   0.5 nm guard) and 20 nm wide fringes at 0.2 nm sampling jitter ≈ 50 pm; width fit → 20/20 locked,
   ≈ 10 pm, plateaus ±10–40 pm. Default stays off (published numbers); on the cooldown it gives
   −140.1 / +364.5 pm/°C. Tested in `tests/test_tracking.py` (SIMULATED steps + cooldown).
+- `sms_analysis/findpeak.py` (2026-10-23, from the owner's notes after the advisor's screen share:
+  "Igor is the reference — do it as Ertan does; Igor uses FindPeak; the range is explicit, set by
+  hand; much simpler; work with a tiny part of the data; the two files come out at different noise
+  levels — run it straight like Igor's FindPeak") — `box_smooth` (sliding average, reflected ends),
+  `find_peak(x, y, start, end, box=5, negative, min_level)` = Igor's FindPeak (/B /N /M /R incl.
+  backwards search; smooths the *whole* wave then searches the range — smoothing only the range
+  planted false zero crossings at its edges; V_PeakLoc by linear interpolation of the first
+  derivative's zero crossing, edges from the second derivative, V_PeakVal from the two raw samples),
+  `track_findpeak(data, a, b, ...)` one fixed range per run, `points_to_nm` for Igor /R=[p1,p2].
+  Advisor's calls on strain.csv: points 735–766 = 1572.0–1578.2 nm ("min1576a"), 274–353 =
+  1479.8–1495.6 ("min1489"). Results: 1576 dip 1574.0 → 1576.6 nm, plateau noise 80/24/12 pm at box
+  1/5/11; cooldown peak 1490–1497 nm → −141 pm/°C (box 5: resid 38 pm, box 11: 19 pm). Difference
+  between the files at equal settings = 6× spectral noise (0.008 vs 0.0013) and 0.2 vs 0.1 nm
+  sampling. App tab "FindPeak (Igor)" (`tab_igor`, `findpeak_cached`, keys `fp_<data_key>_*`,
+  range in nm or Igor points, Igor-style figure via `igor_figure`, FringeLab's tracker on the same
+  fringe quoted underneath); CLI `scripts/igor_findpeak.py --range/--points --min/--max --box`;
+  tests `tests/test_findpeak.py`.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,

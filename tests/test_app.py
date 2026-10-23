@@ -21,7 +21,7 @@ def app():
 
 def test_tabs(app):
     names = [t.label.split(": ")[-1] for t in app.tabs]
-    assert names == ["Spectral map", "Spectrum & peaks", "Fringe tracking", "Sensitivity", "Phase",
+    assert names == ["Spectral map", "Spectrum & peaks", "Fringe tracking", "FindPeak (Igor)", "Sensitivity", "Phase",
                      "3-D view", "Movie", "Export"]
 
 
