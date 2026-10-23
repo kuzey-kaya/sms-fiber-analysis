@@ -47,12 +47,15 @@ def test_movie_and_phase_are_computed_on_request_only():
     at.toggle(key="phase_compute").set_value(True).run()
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("λc (first" in m.value for m in at.markdown)          # the phase tiles appeared
-    assert at.toggle(key="phase_local").value                         # local fit on by default
+    assert at.radio(key="phase_method").value.startswith("Auto")       # both computed, the better one used
+    assert any("Method in use" in m.value and "local two-mode fit" in m.value for m in at.markdown)
     cmp = [d.value for d in at.dataframe if "scatter (mrad)" in d.value.columns]
     assert cmp and len(cmp[0]) == 2
     assert cmp[0]["scatter (mrad)"].iloc[1] < 0.4 * cmp[0]["scatter (mrad)"].iloc[0]   # the comparison shows it
     assert any("smaller** with the local fit" in m.value for m in at.markdown)
-    at.toggle(key="phase_local").set_value(False).run()               # cubic only still works
+    at.radio(key="phase_method").set_value("Cubic only").run()         # cubic only still works
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("Method in use" in m.value and "cubic only" in m.value for m in at.markdown)
     assert not at.exception, [str(e.value) for e in at.exception]
 
 
@@ -101,7 +104,8 @@ def _check_stepped_run(at):
     assert at.session_state["smooth_frames"] == 9 and at.session_state["smooth_flatten"] is False
     kind_box().set_value(False).run()                                         # a continuous run again
     assert not at.exception, [str(e.value) for e in at.exception]
-    assert at.session_state["track_mode"] == "Standard" and at.session_state["reject_jumps"] is True
+    assert at.session_state["track_mode"] == "Fringe-width fit"         # noisy run: width fit stays on ...
+    assert at.session_state["reject_jumps"] is True                       # ... but the jump guard returns
     assert not any("entered per load step" in c.value for c in at.caption)
     kind_box().set_value(True).run()
     assert not at.exception, [str(e.value) for e in at.exception]

@@ -278,13 +278,19 @@ def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam:
         return a * a + b * b + 2 * a * b * np.cos(np.polyval(p[2:], x))
 
     p0 = np.array([t1, t2, *c0])
+    rms0 = float(np.sqrt(np.mean((model(p0, xw) - yw) ** 2)))
     res = least_squares(lambda p: model(p, xw) - yw, p0, method="lm", max_nfev=400)
     coef = res.x[2:]
     rms = float(np.sqrt(np.mean(res.fun ** 2)))
+    # A fit that ends worse than its starting point, or far from the cubic's phase, has slid to a
+    # wrong solution (cos φ has mirror and 2π-shifted minima; seen on noisy SIMULATED runs where the
+    # residual was 0.25 instead of 0.008) — report it as not converged, the caller keeps the cubic.
+    ok = (bool(res.success) and rms <= max(rms0, 1e-6) and rms <= 0.05
+          and abs(float(coef[-1]) - c0[-1]) <= 1.0)
     return LocalPhaseFit(lam=float(lam), phi=float(coef[-1]), phi_cubic=float(c0[-1]),
                          t1=float(abs(res.x[0])), t2=float(abs(res.x[1])), coefficients=coef,
                          window=(float(lo), float(hi)), rms=rms, n_points=int(m.sum()),
-                         converged=bool(res.success))
+                         converged=ok)
 
 
 def phase_series(

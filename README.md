@@ -111,6 +111,16 @@ clean plateau (±10–40 pm). On the cooldown run it gives −140.1 / +364.5 pm/
 for the two headline fringes (standard: −141.3 / +359.3, which stay the quoted
 numbers).
 
+**What the first look at a file decides.** Two separate things: the tracker
+switches to the fringe-width fit when the standard tracker loses most fringes
+*or* the spectra are noisy (above 0.004 in transmittance — a noisy continuous run
+flickered on 10 fringes with the standard tracker and 3 with the width fit), and
+*Load-step run* is ticked only when the width-fit tracks show plateaus separated
+by jumps, so a noisy continuous run is never mistaken for a stepped one. The
+Spectrum & peaks tab draws the smoothed curve on noisy runs and positions its
+markers with the width fit whenever the tracker does, so no two tabs disagree
+about where a peak is.
+
 **Load steps — the condition entered by hand.** A load file usually has no load
 column (the strain file's only condition column is the temperature, 21.7–22.7 °C).
 When the tracked wavelength sits on plateaus separated by jumps, the app finds
@@ -253,9 +263,17 @@ names wide-range measurement as future work.
 phase at each of the two wavelengths is refined by a nonlinear least-squares fit
 of T(λ) = t₁² + t₂² + 2t₁t₂cos φ(λ) over two fringe cycles around it, with the
 cubic's coefficients and the mode powers t₁, t₂ as parameters (t₁, t₂ start from
-the nearest maximum and minimum, Eq. 9). It is on by default in the app's Phase
-tab (*Local two-mode fit (PTL)*) and in `phase_analysis.py` (`--no-local` turns
-it off); the series keeps the cubic values in `phase_diff_cubic`. Measured
+the nearest maximum and minimum, Eq. 9). In the app's Phase tab the choice is *Auto / Local two-mode fit / Cubic only*:
+Auto computes both on every frame and uses the one whose readout scatters less
+about its straight line — a safety net, because before the guard below the local
+fit lost badly on noisy simulated runs. With the guard it won on all 9 real,
+perturbed and simulated runs tried on 2026-10-23 (cooldown 25 → 7 mrad, cooldown
++ noise 60 → 11, simulated ramps 13 → 2 and 39 → 17), and the tile *Method in use*
+says what was used. A local fit that ends worse than its starting point, above
+0.05 in transmittance, or more than 1 rad from the cubic is discarded for that
+frame.
+`phase_analysis.py` uses the local fit (`--no-local` turns it off); the series
+keeps the cubic values in `phase_diff_cubic`. Measured
 2026-10-22 as the scatter of the readout about its straight line: cooldown
 1545/1570 nm 25 → 6.6 mrad (0.80 → 0.20 °C resolution), 1485/1565 nm 21 → 5.5
 mrad; strain run 1560/1600 nm 60 → 9 mrad, within-plateau noise 47 → 4 mrad,

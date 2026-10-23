@@ -80,6 +80,24 @@ It is a continuous cooldown — no setpoint steps.
   0.5 nm guard) and 20 nm wide fringes at 0.2 nm sampling jitter ≈ 50 pm; width fit → 20/20 locked,
   ≈ 10 pm, plateaus ±10–40 pm. Default stays off (published numbers); on the cooldown it gives
   −140.1 / +364.5 pm/°C. Tested in `tests/test_tracking.py` (SIMULATED steps + cooldown).
+- Multi-dataset review 2026-10-23 (owner: "check with several things, it changes from dataset to
+  dataset; go over the whole site, fix what is inconsistent or noisy"). Script in the scratchpad ran
+  every method on 9 runs: cooldown, cooldown + 0.008 noise, cooldown every 2nd sample, cooldown
+  cropped 1475–1525, strain, strain cropped 1540–1625, SIM ramps at 0.0013/0.008 noise and 0.1/0.2 nm.
+  Findings and fixes: (1) the PTL local fit slid to wrong solutions on noisy SIMULATED runs (residual
+  0.25 vs 0.008, errors up to 7 rad) → `local_fit` marks a fit not converged when its RMS exceeds the
+  starting point's, exceeds 0.05, or |φ − φ_cubic| > 1 rad; (2) before that guard the cubic beat the local fit on simulated runs (13 vs 43 mrad), after it the
+  local fit wins everywhere (SIM 13 → 2, 39 → 17; cooldown 25 → 7; cooldown + noise 60 → 11 mrad) →
+  the Phase tab's `phase_method` radio "Auto / Local / Cubic" stays as the safety net (Auto = the
+  smaller scatter about the line; the "Method in use" tile says which); (3) a noisy continuous run (cooldown + 0.008) kept the
+  standard tracker and showed 10 flickering fringes → the first-look probe now decides the tracker
+  (width fit if poor lock or `spectral_noise > 0.004`) separately from the run type (steps only if
+  plateaus are found on the width-fit tracks; `width_guess_<key>`); (4) Spectrum & peaks drew raw
+  3-point extrema while the movie drew width-fit ones → same rules now (`spec_smooth_<key>`); (5) the
+  FindPeak tab's default range was ±3 nm around a fringe that moves 7 nm → now the fringe's whole
+  excursion ± 1.5 nm; (6) the pair scan is cubic-only and says so; (7) export settings carry run
+  kind, drawn-lines mode and the flickering fringes. Standard vs width-fit sensitivities agree within
+  0.1–0.7 % on every continuous run; λc is found within 0.05 nm on every variant.
 - `sms_analysis/findpeak.py` (2026-10-23, from the owner's notes after the advisor's screen share:
   "Igor is the reference — do it as Ertan does; Igor uses FindPeak; the range is explicit, set by
   hand; much simpler; work with a tiny part of the data; the two files come out at different noise

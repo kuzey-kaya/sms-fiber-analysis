@@ -1207,9 +1207,27 @@ def _poor_lock(table: pd.DataFrame, min_lock: float = 90.0) -> bool:
 # All of this is set before the widgets exist, because widget state cannot change once drawn.
 kind_key = f"run_kind_{data_key}"
 if kind_key not in st.session_state:
+    # Two separate decisions from one quick look at the file (checked on 9 real/perturbed/simulated
+    # runs, 2026-10-23): (1) the tracker — the fringe-width fit when the standard tracker loses most
+    # fringes OR the spectra are noisy (a noisy continuous run flickered on 10 fringes with the
+    # standard tracker, 3 with the width fit); (2) the run type — a load-step run only when the
+    # width-fit tracks actually show plateaus separated by jumps (a noisy continuous run must not be
+    # mistaken for a stepped one just because the standard tracker struggled on it).
     probe = fringe_table(track_all(data, data_key, 0.02, 5, 1.5, 11, 0.5), False)
-    st.session_state[kind_key] = bool(_poor_lock(probe))
-    st.session_state[f"kind_guess_{data_key}"] = st.session_state[kind_key]
+    poor = bool(_poor_lock(probe))
+    noisy_run = spectral_noise(data) > 0.004
+    steps_found = False
+    if poor:
+        wide_probe = track_all(data, data_key, 0.02, 5, 1.5, 11, None, True)
+        wtab = fringe_table(wide_probe, False)
+        good = wtab[(wtab["locked_pct"] >= 90) & wtab["stable"]]["fringe"]
+        for k in good:
+            pl = detect_plateaus(wide_probe[k]["time"].to_numpy(), wide_probe[k]["wavelength"].to_numpy())
+            if len(pl) >= 3 and classify_plateaus(pl).any():
+                steps_found = True
+                break
+    st.session_state[kind_key] = steps_found
+    st.session_state[f"width_guess_{data_key}"] = poor or noisy_run
 with kind_slot:
     is_steps = st.checkbox("Load-step run (strain: weights put on and taken off)", key=kind_key,
                            help="Tick for a staircase experiment: the tracker follows the jumps "
@@ -1220,7 +1238,8 @@ with kind_slot:
 applied_key = f"kind_applied_{data_key}"
 if st.session_state.get(applied_key) != is_steps:
     st.session_state[applied_key] = is_steps
-    st.session_state["track_mode"] = TRACK_MODES[1] if is_steps else TRACK_MODES[0]
+    use_width = is_steps or st.session_state.get(f"width_guess_{data_key}", False)
+    st.session_state["track_mode"] = TRACK_MODES[1] if use_width else TRACK_MODES[0]
     st.session_state["reject_jumps"] = not is_steps
     st.session_state["smooth_frames"] = 9 if is_steps else 1       # the owner decides how much
     st.session_state["smooth_flatten"] = False
@@ -1505,14 +1524,26 @@ with tab_spec:
     n_overlay = c[1].slider("Also overlay evenly spaced spectra", 0, 8, 0)
     ext = detect_extrema(data.wavelengths, data.spectra[row], prominence=prominence,
                          distance=distance, smooth_window=smooth_window)
+    if width_aware:
+        ext = refine_width_fit(data.wavelengths, data.spectra[row], ext)   # as the tracker positions them
     overlay_rows = ([int(r) for r in np.linspace(0, len(data) - 1, n_overlay)] if n_overlay else [])
-    st.plotly_chart(spectrum_figure(data, row, ext, overlay_rows, cond_name, cond_unit),
+    sp_noisy = spectral_noise(data) > 0.004
+    show_smooth = st.checkbox("Draw the smoothed curve the detector works on", value=sp_noisy,
+                              key=f"spec_smooth_{data_key}",
+                              help="Display only. On by default for noisy runs; the markers sit on the drawn curve.")
+    data_spec = replace(data, spectra=smooth(data.spectra, smooth_window)) if show_smooth else data
+    if show_smooth:
+        ext = replace(ext, peak_values=np.interp(ext.peak_wavelengths, data.wavelengths, data_spec.spectra[row]),
+                      dip_values=np.interp(ext.dip_wavelengths, data.wavelengths, data_spec.spectra[row]))
+    st.plotly_chart(spectrum_figure(data_spec, row, ext, overlay_rows, cond_name, cond_unit),
                     width="stretch")
     info = f"t = {data.time[row]:.0f} s"
     if has_cond:
         info += f" · {cond_name} = {data.temperature[row]:.2f} {cond_unit}"
     st.caption(f"{info} · {len(ext.peak_wavelengths)} peaks and {len(ext.dip_wavelengths)} dips "
-               "with the current detection settings.")
+               "with the current detection settings"
+               + (", positioned with the fringe-width fit" if width_aware else "")
+               + (", drawn on the smoothed curve" if show_smooth else "") + ".")
     with st.expander("Detected extrema of this spectrum"):
         st.dataframe(pd.DataFrame({
             "kind": ["peak"] * len(ext.peak_wavelengths) + ["dip"] * len(ext.dip_wavelengths),
@@ -1665,10 +1696,15 @@ with tab_igor:
                       f"(sample step {np.median(np.diff(data.wavelengths)):.2f} nm)")
     else:
         d0 = pick_default(table, tracked, has_cond) if len(table) else None
-        w0 = float(d0.split("@")[1]) if d0 else 0.5 * (wl_min_i + wl_max_i)
+        if d0 and np.isfinite(tracks[d0]["wavelength"]).any():
+            w_lo, w_hi = np.nanmin(tracks[d0]["wavelength"]), np.nanmax(tracks[d0]["wavelength"])
+        else:
+            w_lo = w_hi = 0.5 * (wl_min_i + wl_max_i)
         a_fp, b_fp = st.slider("Range (nm)", wl_min_i, wl_max_i,
-                               (float(max(wl_min_i, w0 - 3.0)), float(min(wl_max_i, w0 + 3.0))), 0.1,
-                               key=f"{fk}_rng", help="Drag the ends; the peak must stay inside it for the whole run.")
+                               (float(max(wl_min_i, w_lo - 1.5)), float(min(wl_max_i, w_hi + 1.5))), 0.1,
+                               key=f"{fk}_rng",
+                               help="Drag the ends; the peak must stay inside it for the whole run. The default "
+                                    f"covers the whole excursion of {d0} plus 1.5 nm on each side.")
     neg = kind_fp.startswith("Min")
     fp = findpeak_cached(data, data_key, float(a_fp), float(b_fp), int(box_fp), neg, min_level)
     found = float(fp["found"].mean() * 100)
@@ -1818,21 +1854,39 @@ with tab_phase:
         if tuple(st.session_state[pair_key]) != (PAPER_LAMBDA_A, PAPER_LAMBDA_B) and (la, lb) == tuple(st.session_state[pair_key]):
             c[2].caption(f"Pair moved to {la:g}/{lb:g} nm: the paper's 1545/1570 nm straddles this run's "
                          f"λc ≈ {fit0_p.lambda_c:.0f} nm, where the local fit cannot be anchored.")
-        phase_local = c[2].toggle(
-            "Local two-mode fit (PTL)", value=True, key="phase_local",
-            help="The manuscript's refinement: around λa and λb the spectrum is fitted to "
+        PHASE_METHODS = ["Auto (the less noisy of the two)", "Local two-mode fit (PTL)", "Cubic only"]
+        phase_method = c[2].radio(
+            "Phase at λa and λb from", PHASE_METHODS, key="phase_method", horizontal=True,
+            help="Cubic only: the cubic through the numbered extrema (the SM1E.2 paper). Local two-mode "
+                 "fit: the PTL manuscript's refinement — around λa and λb the spectrum is fitted to "
                  "T = t1² + t2² + 2 t1 t2 cos φ(λ) over two fringe cycles, with the cubic's coefficients "
-                 "and t1, t2 (from the nearest maximum and minimum) as fit parameters. Off = the cubic "
-                 "through the numbered extrema alone. Skipped for a wavelength whose window would contain "
-                 "λc or leave the band; the readout then keeps the cubic values.")
+                 "and t1, t2 (from the nearest maximum and minimum) as fit parameters; skipped for a "
+                 "wavelength whose window would come within half a period of λc or leave the band. "
+                 "Auto: both are computed on every frame and the one whose readout scatters less about "
+                 "its straight line is used — the local fit wins on the real runs, the cubic on "
+                 "simulated ones whose phase profile is an exact cubic, so this is decided per run.")
         c[2].caption("The paper uses 1545 and 1570 nm; pick both on one side of λc. The pair scan below "
                      "shows which pair responds most to this run's condition.")
         ser = phase_series_cached(data, fits_p, data_key, prominence, distance, smooth_window,
-                                  float(la), float(lb), bool(phase_local))
+                                  float(la), float(lb), True)
         if step_cond is not None:
             # pair the readout with the blanked step condition: the frames recorded while the load was
             # being changed must not enter the fit or the scatter (they would sit at the previous load)
             ser = ser.assign(temperature=step_cond)
+        r_loc, r_cub = _resid_std(ser, "phase_diff"), _resid_std(ser, "phase_diff_cubic")
+        if phase_method == PHASE_METHODS[2]:
+            phase_use = "cubic"
+        elif phase_method == PHASE_METHODS[1]:
+            phase_use = "local"
+        elif np.isfinite(r_loc) and np.isfinite(r_cub):
+            phase_use = "local" if r_loc < r_cub else "cubic"
+        else:
+            phase_use = "local" if ser["local_ok"].astype(bool).mean() >= 0.5 else "cubic"
+        ser_local = ser                      # both columns, for the comparison below
+        if phase_use == "cubic":
+            ser = ser.assign(phi_a=ser["phi_a_cubic"], phi_b=ser["phi_b_cubic"],
+                             phase_diff=ser["phase_diff_cubic"],
+                             phase_diff_signed=ser["phi_b_cubic"] - ser["phi_a_cubic"])
         n_fit = int(ser["phase_diff"].notna().sum())
         sens_p = None
         if has_cond and n_fit >= 3:
@@ -1848,20 +1902,19 @@ with tab_phase:
             tiles += [(f"Readout per {cond_unit}", f"{sens_p.slope * 1e3:+.1f} mrad",
                        f"± {sens_p.stderr * 1e3:.1f} · R² {sens_p.r_squared:.4f}"),
                       ("Span over the run", f"{sens_p.span_rad:.2f} rad", f"= {sens_p.span_fringes:.2f} fringe")]
-        if phase_local:
-            ok_pct = 100.0 * float(ser["local_ok"].astype(bool).mean()) if len(ser) else 0.0
-            t1 = np.nanmean(ser[["t1_a", "t1_b"]].to_numpy(float))
-            t2 = np.nanmean(ser[["t2_a", "t2_b"]].to_numpy(float))
-            vis = 2 * t1 * t2 / (t1 ** 2 + t2 ** 2) if np.isfinite(t1 + t2) and (t1 ** 2 + t2 ** 2) else np.nan
-            if has_cond and sens_p is not None:
-                r_loc, r_cub = _resid_std(ser, "phase_diff"), _resid_std(ser, "phase_diff_cubic")
-                tiles += [("Local fit vs cubic", f"{r_loc * 1e3:.0f} vs {r_cub * 1e3:.0f} mrad",
-                           f"scatter about the line · {ok_pct:.0f} % of frames refined"),
-                          ("Mode powers t1, t2", f"{t1:.2f}, {t2:.2f}",
-                           f"visibility {vis:.2f} · fit RMS {np.nanmedian(ser['rms_local']):.4f} (T)")]
-            else:
-                tiles += [("Mode powers t1, t2", f"{t1:.2f}, {t2:.2f}",
-                           f"visibility {vis:.2f} · {ok_pct:.0f} % of frames refined")]
+        ok_pct = 100.0 * float(ser_local["local_ok"].astype(bool).mean()) if len(ser_local) else 0.0
+        t1 = np.nanmean(ser_local[["t1_a", "t1_b"]].to_numpy(float))
+        t2 = np.nanmean(ser_local[["t2_a", "t2_b"]].to_numpy(float))
+        vis = 2 * t1 * t2 / (t1 ** 2 + t2 ** 2) if np.isfinite(t1 + t2) and (t1 ** 2 + t2 ** 2) else np.nan
+        used = "local two-mode fit" if phase_use == "local" else "cubic only"
+        if has_cond and np.isfinite(r_loc) and np.isfinite(r_cub):
+            tiles += [("Method in use", used,
+                       f"scatter local {r_loc * 1e3:.0f} vs cubic {r_cub * 1e3:.0f} mrad · {ok_pct:.0f} % of frames refined"
+                       + (" · chosen automatically" if phase_method == PHASE_METHODS[0] else ""))]
+        else:
+            tiles += [("Method in use", used, f"{ok_pct:.0f} % of frames refined")]
+        tiles += [("Mode powers t1, t2", f"{t1:.2f}, {t2:.2f}",
+                   f"visibility {vis:.2f} · fit RMS {np.nanmedian(ser_local['rms_local']):.4f} (T)")]
         stat_strip(tiles)
         st.plotly_chart(phase_profile_figure(data, fit0_p), width="stretch")
         ser_d = ser.assign(phase_diff=smooth_series(ser["phase_diff"].to_numpy(float), smooth_frames,
@@ -1869,37 +1922,38 @@ with tab_phase:
         st.caption(f"Readout drawn as {_drawn.replace('as tracked', 'fitted frame by frame')} "
                    "(*Smooth the drawn lines* in the sidebar); the fit and the numbers above use every frame.")
         st.plotly_chart(phase_readout_figure(ser_d, sens_p, la, lb, has_cond, cond_title), width="stretch")
-        if phase_local and has_cond and "phase_diff_cubic" in ser:
-            with st.expander("How much better is the local fit? · cubic vs local, same frames, same pair",
+        if has_cond and "phase_diff_cubic" in ser_local:
+            with st.expander("Cubic vs local fit on this run · same frames, same pair",
                              expanded=True, icon=":material/compare:"):
-                cmp = phase_compare_table(ser, cond_unit, _plat)
+                cmp = phase_compare_table(ser_local, cond_unit, _plat)
                 if len(cmp) == 2:
                     st.dataframe(cmp, hide_index=True, width="stretch",
                                  column_config={c: st.column_config.NumberColumn(format="%.3f" if c == "R²" else "%.2f")
                                                 for c in cmp.columns if c != "method"})
                     sc_c, sc_l = cmp["scatter (mrad)"].to_numpy()
-                    better = sc_c / sc_l if sc_l else np.nan
+                    ratio = sc_c / sc_l if sc_l else np.nan
                     pn = ""
                     if "noise on the plateaus (mrad)" in cmp:
                         a, b = cmp["noise on the plateaus (mrad)"].to_numpy()
                         pn = f" On the load plateaus, where nothing should move, the readout wobbles by {a:.1f} mrad " \
                              f"with the cubic alone and {b:.1f} mrad with the local fit."
+                    verdict = (f"**{ratio:.1f}× smaller** with the local fit" if ratio >= 1
+                               else f"**{1 / ratio:.1f}× larger** with the local fit (the cubic is the better choice here)")
                     st.markdown(
-                        f"Both rows use the same {int(ser['local_ok'].astype(bool).sum())} frames and the same "
+                        f"Both rows use the same {int(ser_local['local_ok'].astype(bool).sum())} frames and the same "
                         f"wavelengths; only the last step of the algorithm differs. The scatter about the "
-                        f"straight line is **{better:.1f}× smaller** with the local fit, so the smallest "
-                        f"{cond_name.lower()} change it can resolve goes from "
-                        f"{cmp[f'resolution ({cond_unit})'].iloc[0]:.2f} to "
-                        f"{cmp[f'resolution ({cond_unit})'].iloc[1]:.2f} {cond_unit}, while the slope "
-                        f"(the sensitivity) stays within "
+                        f"straight line is {verdict}: the smallest {cond_name.lower()} change resolvable is "
+                        f"{cmp[f'resolution ({cond_unit})'].iloc[0]:.2f} {cond_unit} with the cubic and "
+                        f"{cmp[f'resolution ({cond_unit})'].iloc[1]:.2f} {cond_unit} with the local fit, and the "
+                        f"slopes differ by "
                         f"{abs(cmp[f'slope (mrad/{cond_unit})'].iloc[1] - cmp[f'slope (mrad/{cond_unit})'].iloc[0]):.1f} "
-                        f"mrad/{cond_unit} of the cubic's — the refinement removes noise, not signal.{pn}")
-                    st.plotly_chart(phase_compare_figure(ser, cond_title, cond_unit), width="stretch")
+                        f"mrad/{cond_unit}.{pn} The figures above use the **{used}**"
+                        + (" (Auto picked it)." if phase_method == PHASE_METHODS[0] else "."))
+                    st.plotly_chart(phase_compare_figure(ser_local, cond_title, cond_unit), width="stretch")
                     st.caption("Top: the two readouts over the run (grey = cubic only, red = with the local fit). "
                                "Bottom: what is left after taking each one's own straight line out — the width of "
                                "that band is the noise of the method. To repeat the check on another run: upload "
-                               "it, open this tab, and compare the two rows; turning the toggle above off shows the "
-                               "cubic-only figures everywhere.")
+                               "it, open this tab, and compare the two rows; the choice above forces either one.")
                 else:
                     st.info("The local fit could not be applied on enough frames of this pair to compare "
                             "(a window that holds λc or leaves the band is refused); try a pair on one side of λc.")
@@ -1917,7 +1971,9 @@ with tab_phase:
                                        "scatter (rad)": st.column_config.NumberColumn(format="%.3f"),
                                        f"resolution ({cond_unit})": st.column_config.NumberColumn(format="%.2f"),
                                        "span (rad)": st.column_config.NumberColumn(format="%.2f")})
-                    st.caption("Resolution = scatter about the line ÷ slope; curvature counts as scatter, so it "
+                    st.caption("Ranked with the cubic alone (the local fit refines the chosen pair only, so "
+                               "a pair's scatter above drops further once it is selected; pairs next to λc "
+                               "cannot be refined). Resolution = scatter about the line ÷ slope; curvature counts as scatter, so it "
                                "is an upper bound.")
                 common = tracked_phase_change(fit0_p, {k: tracks[k] for k in tracked["fringe"]})
                 if len(common):
@@ -2076,7 +2132,8 @@ with tab_export:
                     wavelength_range_nm=list(wl_range), prominence=prominence, distance=distance,
                     smooth_window=smooth_window, search_window_nm=search_window,
                     max_step_nm=max_step, min_lock_pct=min_lock, tracking=track_mode,
-                    condition_source=cond_source)
+                    condition_source=cond_source, run_kind="load steps" if is_steps else "continuous",
+                    drawn_lines=_drawn, flickering_fringes=_flick)
     stem = Path(file_name).stem
     if cond_source == "steps":
         steps_out = plateaus.assign(value=step_values, loaded=classify_plateaus(plateaus))
