@@ -1738,7 +1738,8 @@ with tab_igor:
     tiles = [("Range", f"{a_fp:.1f}–{b_fp:.1f} nm", f"{int(((data.wavelengths >= min(a_fp, b_fp)) & (data.wavelengths <= max(a_fp, b_fp))).sum())} samples per spectrum"),
              ("Found", f"{found:.0f} %", "spectra with a peak inside the range"),
              ("Peak wavelength", f"{np.nanmin(w_fp):.2f} → {np.nanmax(w_fp):.2f} nm" if np.isfinite(w_fp).any() else "—",
-              f"width {np.nanmedian(fp['width']):.1f} nm (median)")]
+              f"width {np.nanmedian(fp['width']):.1f} nm (median)" if np.isfinite(fp["width"]).any()
+              else "width: the peak's edges (V_PeakWidth) lie outside this range")]
     fp_fit = None
     if has_cond and np.isfinite(w_fp).sum() >= 3:
         try:
