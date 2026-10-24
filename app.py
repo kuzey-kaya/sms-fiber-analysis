@@ -607,6 +607,47 @@ def igor_figure(track, has_cond, cond_title):
     return fig
 
 
+def shift_vs_condition_figure(wavelength, cond, cond_title, unit, plateaus, fit, settle=2):
+    """Igor's second graph (`display shift1555 vs mass`): the peak's shift from where it started
+    against the condition. On a load-step run one red point per plateau (its mean shift at its
+    mass, the frames themselves faint behind), on a continuous run every frame; the straight fit
+    of the tiles drawn through it."""
+    w = np.asarray(wavelength, float)
+    c = np.asarray(cond, float)
+    ok = np.isfinite(w) & np.isfinite(c)
+    fig = go.Figure()
+    if plateaus is not None and len(plateaus):
+        a0, b0 = int(plateaus.iloc[0]["start"]) + settle, int(plateaus.iloc[0]["end"]) + 1 - settle
+        w0 = np.nanmean(w[a0:b0]) if np.isfinite(w[a0:b0]).any() else w[ok][0]
+        xs, ys = [], []
+        for _, pl in plateaus.iterrows():
+            a, b = int(pl["start"]) + settle, int(pl["end"]) + 1 - settle
+            seg_w, seg_c = w[a:b], c[a:b]
+            m = np.isfinite(seg_w) & np.isfinite(seg_c)
+            if m.sum() > 2:
+                xs.append(float(np.mean(seg_c[m])))
+                ys.append(float(np.mean(seg_w[m]) - w0))
+        fig.add_trace(go.Scatter(x=c[ok], y=w[ok] - w0, mode="markers", name="every spectrum",
+                                 marker=dict(size=3, color=RED, opacity=0.18),
+                                 hovertemplate="%{x:.1f} → %{y:+.3f} nm<extra></extra>"))
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="markers", name="plateau mean",
+                                 marker=dict(size=9, color=RED, symbol="circle-open", line=dict(width=2)),
+                                 hovertemplate="%{x:.1f} → %{y:+.3f} nm<extra></extra>"))
+    else:
+        w0 = w[ok][0]
+        fig.add_trace(go.Scatter(x=c[ok], y=w[ok] - w0, mode="markers", name="every spectrum",
+                                 marker=dict(size=3.5, color=RED, opacity=0.5),
+                                 hovertemplate="%{x:.2f} → %{y:+.3f} nm<extra></extra>"))
+    if fit is not None and ok.any():
+        t = np.linspace(np.nanmin(c[ok]), np.nanmax(c[ok]), 50)
+        fig.add_trace(go.Scatter(x=t, y=fit.intercept + fit.slope * t - w0, mode="lines",
+                                 name=f"linear {fit.slope * 1e3:+.1f} pm/{unit}",
+                                 line=dict(color=BLUE, width=1.6, dash="dash"), hoverinfo="skip"))
+    fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title=cond_title,
+                      yaxis_title="Shift (nm)", legend=dict(orientation="h", yanchor="top", y=-0.22, x=0))
+    return fig
+
+
 def igor_multi_figure(tracks_sel, has_cond, cond_title):
     """Several fringes at once: each as its shift from where it started (left), condition (right)."""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -1767,6 +1808,15 @@ with tab_igor:
     st.caption(f"Igor's graph: V_PeakLoc (red, left) and {igor_title_fp} (blue, right) against time; "
                f"lines drawn {_drawn}. A frame whose range holds no such extremum is a gap — widen the "
                "range or move it when that happens, as in Igor.")
+    if has_cond and np.isfinite(w_fp).sum() >= 3:
+        cond_fp = step_cond if step_cond is not None else data.temperature
+        st.plotly_chart(shift_vs_condition_figure(w_fp, cond_fp, cond_title, cond_unit, _plat, fp_fit),
+                        width="stretch")
+        st.caption(f"Igor's second graph (`display shift vs {cond_name.lower()}`): the peak's shift from "
+                   + ("the first plateau, one open circle per load step (the frames faint behind it)"
+                      if _plat is not None else "the first spectrum, every spectrum a point")
+                   + f"; the dashed line is the straight fit of the tiles above"
+                   + (" (the frames recorded while the load was being changed are left out)." if _plat is not None else "."))
     # the same fringe with FringeLab's tracker, for the record
     near = [k for k in table["fringe"] if min(a_fp, b_fp) <= float(k.split("@")[1]) <= max(a_fp, b_fp)
             and k.startswith("dip" if neg else "peak")]

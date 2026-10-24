@@ -119,7 +119,11 @@ It is a continuous cooldown — no setpoint steps.
   peak@1565; FringeLab's width fit stays lower, 20/13/8/10 pm). The expander "Set by hand" keeps
   range in nm or Igor point numbers, kind, box slider, /M; a caption prints the equivalent
   `FindPeak /R=(a,b) /B=… /N`. Igor-style figure via `igor_figure`, FringeLab's tracker on the same
-  fringe quoted underneath. CLI `scripts/igor_findpeak.py --range/--points --min/--max --box`;
+  fringe quoted underneath. 2026-10-24 (owner: "make every element the way the advisor wanted", read
+  back from the whole chat): Igor's *second* graph from the video, `display shift1555 vs mass`, is
+  under it — `shift_vs_condition_figure`: shift from the first plateau's mean (or the first frame),
+  one open red circle per plateau (mean shift at its mass, settle rows skipped, the frames faint
+  behind), dashed straight fit from the tiles; on a continuous run every frame is a point. CLI `scripts/igor_findpeak.py --range/--points --min/--max --box`;
   tests `tests/test_findpeak.py`, `test_app.py::_check_strain_file`. Same day: the drawn-lines
   default on a continuous run went 1 → 5 frames (step runs stay at 9), fits untouched.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`

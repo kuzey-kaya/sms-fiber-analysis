@@ -169,8 +169,10 @@ GitHub's free monthly allowance is limited.
   and *Flatten plateaus*. Untick *Load-step run* for a continuous run.
 - **FindPeak (Igor) tab:** Igor's `FindPeak` on one fixed range, exactly as the
   group's `trackpeaknew` does it. Pick a fringe from the list — range, minimum or
-  maximum and the box width are set for you — and you get the Igor graph and a
-  CSV; *Set by hand* takes a range in nm or Igor point numbers (e.g. 735 and 766).
+  maximum and the box width are set for you — and you get Igor's two graphs
+  (peak wavelength against time, and *shift vs mass* with one point per load
+  step) and a CSV; *Set by hand* takes a range in nm or Igor point numbers
+  (e.g. 735 and 766).
 - **Phase readout, and how to check the local fit:** on the Phase tab turn on
   *Compute the phase readout*. The box *How much better is the local fit?* shows
   the readout computed two ways on the same frames — the cubic through the

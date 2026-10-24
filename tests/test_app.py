@@ -164,6 +164,7 @@ def _check_strain_file(at):
     fp_pick[0].set_value("dip@1574.0").run()
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("FindPeak /R=(1572." in c.value for c in at.caption)
+    assert any("Igor's second graph" in c.value and "per load step" in c.value for c in at.caption)
     at.radio(key="detail_mode").set_value("One fringe (Igor style)").run()
     assert not at.exception
     at.radio(key="movie_kind").set_value("Spectra and fringes").run()

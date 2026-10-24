@@ -145,9 +145,11 @@ the fringe, from a list — its range (the whole excursion plus 1.5 nm), its kin
 (minimum/maximum) and the box width (a quarter of its half period, 5–41 samples)
 follow from it. *Set by hand* underneath takes a range in nm or as Igor point
 numbers, so the advisor's calls (`trackpeaknew(…, "min1576a", …, 735, 766, -1)`)
-can be typed in as they are, plus the box and `/M`; the result is the Igor graph
-(V_PeakLoc red, condition blue) with found-%, sensitivity and, on a load run,
-the noise on the plateaus, plus FringeLab's own tracker on the same fringe for
+can be typed in as they are, plus the box and `/M`; the result is both of the
+advisor's Igor graphs — V_PeakLoc (red) with the condition (blue) against time,
+and `display shift vs mass`: the shift from the first plateau with one open
+circle per load step and the straight fit — with found-%, sensitivity and, on a
+load run, the noise on the plateaus, plus FringeLab's own tracker on the same fringe for
 comparison. Script: `python scripts/igor_findpeak.py data/strain.csv --points 735 766 --min`.
 Checked 2026-10-23: points 735–766 of the strain file = 1572.0–1578.2 nm, the
 1576 nm dip steps 1574.0 → 1576.6 nm exactly as on the advisor's screen (plateau
