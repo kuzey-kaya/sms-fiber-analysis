@@ -31,6 +31,7 @@ from plotly.subplots import make_subplots
 
 from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_sms_csv,
                           track_all_extrema)
+from sms_analysis.igor_export import findpeak_itx, spectra_itx, track_names, tracks_itx
 from sms_analysis.findpeak import points_to_nm, track_findpeak
 from sms_analysis.peaks import smooth
 from sms_analysis.tracking import flicker_fraction, refine_width_fit
@@ -590,8 +591,9 @@ def shifts_figure(tracks, x_mode, cond_title):
     return fig
 
 
-def igor_figure(track, has_cond, cond_title):
-    """Tracked wavelength (red, left) and condition (blue, right) vs time."""
+def igor_figure(track, has_cond, cond_title, cursors=None):
+    """Tracked wavelength (red, left) and condition (blue, right) vs time. ``cursors`` = (pntA, pntB):
+    Igor's round (A) and square (B) cursors drawn on the wavelength trace."""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Scatter(x=track["time"], y=track["wavelength"], mode="lines",
                              name="wavelength", line=dict(color=RED, width=1.6),
@@ -601,10 +603,60 @@ def igor_figure(track, has_cond, cond_title):
                                  name=cond_title, line=dict(color=BLUE, width=1.6)),
                       secondary_y=True)
         fig.update_yaxes(title_text=cond_title, color=BLUE, showgrid=False, secondary_y=True)
+    if cursors is not None:
+        t = track["time"].to_numpy(float)
+        w = track["wavelength"].to_numpy(float)
+        for pnt, sym, name in ((cursors[0], "circle", "A"), (cursors[1], "square", "B")):
+            if 0 <= pnt < len(t):
+                fig.add_trace(go.Scatter(x=[t[pnt]], y=[w[pnt]], mode="markers+text", text=[name],
+                                         textposition="top center", name=f"cursor {name}",
+                                         marker=dict(symbol=sym, size=12, color="#111111",
+                                                     line=dict(color=RED, width=2))), secondary_y=False)
+                fig.add_vline(x=t[pnt], line_color="#888888", line_dash="dot", line_width=1)
     fig.update_yaxes(title_text="Peak Wavelength (nm)", color=RED, secondary_y=False)
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10),
                       xaxis_title="Time, seconds", showlegend=False)
     return fig
+
+
+def cursor_panel(track, key, cond_title, plateaus=None):
+    """Igor's info panel under a graph: cursors A (round) and B (square) on the trace by point
+    number, with X, Y and dX, dY — the way the advisor reads a step height off his graph.
+    Defaults: on a load run A in the first plateau and B in the last loaded one; otherwise the
+    first and last locked frames. Returns (pntA, pntB)."""
+    t = track["time"].to_numpy(float)
+    w = track["wavelength"].to_numpy(float)
+    c = track["temperature"].to_numpy(float) if "temperature" in track else None
+    n = len(t)
+    ok = np.flatnonzero(np.isfinite(w))
+    a0, b0 = (int(ok[0]), int(ok[-1])) if ok.size else (0, max(n - 1, 0))
+    if plateaus is not None and len(plateaus) >= 2:
+        loaded = classify_plateaus(plateaus)
+        last = plateaus[loaded].iloc[-1] if loaded.any() else plateaus.iloc[-1]
+        a0 = int((plateaus.iloc[0]["start"] + plateaus.iloc[0]["end"]) // 2)
+        b0 = int((last["start"] + last["end"]) // 2)
+    with st.expander("Cursors A and B · Igor's info panel (pnt, X, Y, dX, dY)", expanded=False):
+        cc = st.columns([1, 1, 3])
+        pa = int(cc[0].number_input("A (round) · pnt", 0, max(n - 1, 0), a0, key=f"{key}_curA"))
+        pb = int(cc[1].number_input("B (square) · pnt", 0, max(n - 1, 0), b0, key=f"{key}_curB"))
+        rows = []
+        for name, pnt in (("A", pa), ("B", pb)):
+            rows.append({"cursor": name, "pnt": pnt, "X (s)": t[pnt], "Y (nm)": w[pnt],
+                         **({cond_title: c[pnt]} if c is not None else {})})
+        rows.append({"cursor": "B − A", "pnt": pb - pa, "X (s)": t[pb] - t[pa], "Y (nm)": w[pb] - w[pa],
+                     **({cond_title: c[pb] - c[pa]} if c is not None else {})})
+        cc[2].dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                        column_config={"X (s)": st.column_config.NumberColumn(format="%.2f"),
+                                       "Y (nm)": st.column_config.NumberColumn(format="%.4f"),
+                                       **({cond_title: st.column_config.NumberColumn(format="%.3f")} if c is not None else {})})
+        if np.isfinite(w[pa]) and np.isfinite(w[pb]):
+            cc[2].caption(f"dY = {(w[pb] - w[pa]) * 1e3:+.0f} pm over dX = {t[pb] - t[pa]:.0f} s "
+                          "— the step height the way Igor's cursors give it. Move the point numbers to "
+                          "read any two frames.")
+        else:
+            cc[2].caption("A cursor sits on a frame where the fringe was not found (Igor shows NaN there); "
+                          "move it to a locked frame.")
+    return pa, pb
 
 
 def shift_vs_condition_figure(wavelength, cond, cond_title, unit, plateaus, fit, settle=2):
@@ -1563,11 +1615,16 @@ with tab_spec:
     c = st.columns([3, 1])
     row = c[0].slider("Spectrum number", 0, len(data) - 1, 0) if len(data) > 1 else 0
     n_overlay = c[1].slider("Also overlay evenly spaced spectra", 0, 8, 0)
+    first_too = c[1].checkbox("Overlay the first spectrum", value=False, key=f"spec_first_{data_key}",
+                              help="Igor: `display n1, n850 vs wave0` — the first spectrum behind the chosen one, "
+                                   "to see how far the fringes moved.")
     ext = detect_extrema(data.wavelengths, data.spectra[row], prominence=prominence,
                          distance=distance, smooth_window=smooth_window)
     if width_aware:
         ext = refine_width_fit(data.wavelengths, data.spectra[row], ext)   # as the tracker positions them
     overlay_rows = ([int(r) for r in np.linspace(0, len(data) - 1, n_overlay)] if n_overlay else [])
+    if first_too and row != 0 and 0 not in overlay_rows:
+        overlay_rows = [0] + overlay_rows
     sp_noisy = spectral_noise(data) > 0.004
     show_smooth = st.checkbox("Draw the smoothed curve the detector works on", value=sp_noisy,
                               key=f"spec_smooth_{data_key}",
@@ -1673,7 +1730,9 @@ with tab_track:
                                   horizontal=True, key=f"igor_axis_{data_key}", label_visibility="collapsed")
                 if axis != cond_title:
                     igor_track, igor_title = track_d.assign(temperature=file_cond), file_cond_title
-            left.plotly_chart(igor_figure(igor_track, has_cond, igor_title), width="stretch")
+            with left:
+                cur_tr = cursor_panel(igor_track, f"igor_{data_key}", igor_title, _plat)
+            left.plotly_chart(igor_figure(igor_track, has_cond, igor_title, cursors=cur_tr), width="stretch")
             left.caption("Igor-style view: tracked wavelength (red, left axis) and "
                          f"{igor_title} (blue, right axis) against time.")
         if len(chosen) == 1 and has_cond:
@@ -1804,7 +1863,8 @@ with tab_igor:
             igor_title_fp = cond_title
     else:
         igor_title_fp = cond_title
-    st.plotly_chart(igor_figure(igor_fp, has_cond, igor_title_fp), width="stretch")
+    cur_fp = cursor_panel(igor_fp, f"{fk}_cur", igor_title_fp, _plat)
+    st.plotly_chart(igor_figure(igor_fp, has_cond, igor_title_fp, cursors=cur_fp), width="stretch")
     st.caption(f"Igor's graph: V_PeakLoc (red, left) and {igor_title_fp} (blue, right) against time; "
                f"lines drawn {_drawn}. A frame whose range holds no such extremum is a gap — widen the "
                "range or move it when that happens, as in Igor.")
@@ -1833,8 +1893,35 @@ with tab_igor:
             except ValueError:
                 pass
         st.caption(line + ".")
-    st.download_button("FindPeak track (CSV)", fp.to_csv(index=False), f"{Path(file_name).stem}_findpeak.csv",
-                       "text/csv", key=f"{fk}_dl")
+    dl = st.columns([1, 1, 2])
+    dl[0].download_button("FindPeak track (CSV)", fp.to_csv(index=False), f"{Path(file_name).stem}_findpeak.csv",
+                          "text/csv", key=f"{fk}_dl")
+    # the same track as Igor waves, named the way the advisor's trackpeaknew names them
+    fp_kind = "dip" if neg else "peak"
+    fp_start = float(np.nanmean(w_fp[:5])) if np.isfinite(w_fp[:5]).any() else float(a_fp)
+    fp_names = track_names(fp_kind, fp_start)
+    if _plat is not None and np.isfinite(w_fp).any():
+        a0, b0 = int(_plat.iloc[0]["start"]) + 2, int(_plat.iloc[0]["end"]) - 1
+        w0_fp = float(np.nanmean(w_fp[a0:b0])) if np.isfinite(w_fp[a0:b0]).any() else float(np.nanmin(w_fp))
+    else:
+        w0_fp = float(w_fp[np.isfinite(w_fp)][0]) if np.isfinite(w_fp).any() else float("nan")
+    itx_fp = findpeak_itx(fp_kind, fp_start, fp["time"], fp["wavelength"],
+                          file_cond if file_cond is not None else fp["temperature"],
+                          shift=fp["wavelength"] - w0_fp,
+                          mass=step_cond if step_cond is not None else None,
+                          call=f"FindPeak /R=({a_fp:.1f},{b_fp:.1f}) /B={box_fp}{' /N' if neg else ''} on {file_name}")
+    dl[1].download_button("Igor waves (.itx)", itx_fp, f"{Path(file_name).stem}_{fp_names['wavelength']}.itx",
+                          "text/plain", key=f"{fk}_itx",
+                          help="Igor Text file: File → Load Waves → Load Igor Text. Waves "
+                               f"{fp_names['wavelength']}, {fp_names['time']}, {fp_names['temperature']}, "
+                               f"{fp_names['shift']}" + (", mass" if step_cond is not None else "")
+                               + " — the names the advisor's trackpeaknew uses, so `display "
+                               f"{fp_names['wavelength']} vs {fp_names['time']}` works as is.")
+    dl[2].caption(f"Igor waves: `{fp_names['wavelength']}`, `{fp_names['time']}`, `{fp_names['temperature']}`, "
+                  f"`{fp_names['shift']}`" + (", `mass`" if step_cond is not None else "")
+                  + " — `display " + fp_names["wavelength"] + " vs " + fp_names["time"] + "` and `display "
+                  + fp_names["shift"] + (" vs mass`" if step_cond is not None else f" vs {fp_names['temperature']}`")
+                  + " redraw the two graphs above in Igor.")
 
 # ---- sensitivity ----------------------------------------------------------
 with tab_sens:
@@ -2226,5 +2313,26 @@ with tab_export:
                          f"{stem}_fringes.csv", "text/csv")
     c[3].download_button("Settings (JSON)", json.dumps(settings, indent=2),
                          f"{stem}_settings.json", "application/json")
+    st.markdown("**For Igor Pro** — Igor Text files (`File → Load Waves → Load Igor Text`), named the way "
+                "the advisor's experiment names them: `wave0` + `n0`, `n1`, … for the spectra with `tim` "
+                "and `temp`, and `peakmin1552`-style waves for the tracked fringes (plus `mass` on a load run).")
+    ci = st.columns([1, 1, 2])
+    ci[0].download_button("Tracked fringes (.itx)",
+                          tracks_itx(tracks, data.time, file_cond if file_cond is not None else data.temperature,
+                                     "temperature" if file_cond is not None or cond_source != "steps" else cond_name,
+                                     mass=step_cond if cond_source == "steps" else None, source=file_name),
+                          f"{stem}_tracks.itx", "text/plain", key="itx_tracks")
+    every_itx = int(ci[1].number_input("spectra: every N-th", 1, max(1, len(data)), 1, key="itx_every",
+                                       help="1 = all spectra (one wave each); larger N keeps the file small."))
+    rows_itx = list(range(0, len(data), every_itx))
+    if rows_itx[-1] != len(data) - 1:
+        rows_itx.append(len(data) - 1)
+    ci[1].download_button(f"Spectra (.itx, {len(rows_itx)} waves)",
+                          spectra_itx(data.wavelengths, data.spectra, data.time,
+                                      file_cond if file_cond is not None else data.temperature, rows_itx, file_name),
+                          f"{stem}_spectra.itx", "text/plain", key="itx_spectra")
+    ci[2].caption("In Igor: `display n0, n" + str(rows_itx[-1]) + " vs wave0` overlays the first and last spectrum, "
+                  "and `trackpeaknew(\"n\", 1, 1, N, wave0, \"min1489\", temp, tim, p1, p2, -1)` runs the advisor's "
+                  "own tracker on exactly the spectra FringeLab analysed (same crop, same frames).")
 
 footer()

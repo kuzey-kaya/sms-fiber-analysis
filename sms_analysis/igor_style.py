@@ -33,6 +33,9 @@ def plot_igor_tracking(
     automatically to mimic the Igor graph's density but can be overridden.
     """
     ok = track.dropna(subset=["wavelength"])
+    if ok.empty:
+        raise ValueError("the track holds no locked frames - nothing to draw (choose another fringe "
+                         "or the fringe-width fit)")
 
     fig, ax = plt.subplots(figsize=figsize)
     fig.patch.set_facecolor("white")

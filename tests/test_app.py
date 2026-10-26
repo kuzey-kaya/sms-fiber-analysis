@@ -165,6 +165,14 @@ def _check_strain_file(at):
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("FindPeak /R=(1572." in c.value for c in at.caption)
     assert any("Igor's second graph" in c.value and "per load step" in c.value for c in at.caption)
+    # Igor's info panel: cursors A/B default to the first plateau and the last loaded one
+    cur = [d.value for d in at.dataframe if "cursor" in d.value.columns]
+    assert cur and cur[0]["cursor"].tolist() == ["A", "B", "B − A"]
+    assert abs(cur[0]["Y (nm)"].iloc[2]) > 1.0                          # dip@1491 moves > 1 nm by the last step
+    # Igor Text downloads: FindPeak track with the advisor's names, tracks and spectra in Export
+    names = [b.label for b in at.get("download_button")]
+    assert "Igor waves (.itx)" in names and "Tracked fringes (.itx)" in names
+    assert any(n.startswith("Spectra (.itx") for n in names)
     at.radio(key="detail_mode").set_value("One fringe (Igor style)").run()
     assert not at.exception
     at.radio(key="movie_kind").set_value("Spectra and fringes").run()

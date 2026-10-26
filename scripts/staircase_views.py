@@ -32,6 +32,8 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sms_analysis import load_sms_csv, track_feature  # noqa: E402
+import numpy as np  # noqa: E402
+from sms_analysis.auto import choose  # noqa: E402
 from sms_analysis.igor_style import plot_igor_tracking  # noqa: E402
 from sms_analysis.staircase import plot_staircase, staircase_bin  # noqa: E402
 from sms_analysis.tracking import track_band_extremum, track_feature_legacy  # noqa: E402
@@ -62,10 +64,18 @@ def main():
     # fig9: temperature-bin plateaus of the cleanly tracked dip ---------------
     if data.has_temperature:
         track = track_feature(data, start_wavelength=START_NM, kind="dip")
+        label = f"dip@{START_NM:.0f}"
+        if np.isfinite(track["wavelength"]).mean() < 0.9:
+            # not this file's fringe (e.g. the strain run): take the app's automatic choice
+            auto = choose(data)
+            track, label = auto.track, auto.fringe
+            print(f"dip@{START_NM} is not tracked in this file -> using {label} "
+                  f"({'fringe-width fit' if auto.width_aware else 'standard tracker'})")
         steps = staircase_bin(track, step_c=STEP_C)
-        fig, ax, _ = plot_staircase(track, steps, wl_ticks=2, temp_ticks=5, time_ticks=5000)
-        ax.set_title(f"Step-averaged tracking (real data, {STEP_C:g} °C bins, "
-                     f"dip@{START_NM:.0f})", fontsize=10)
+        span = float(np.nanmax(track["temperature"]) - np.nanmin(track["temperature"]))
+        fig, ax, _ = plot_staircase(track, steps, wl_ticks=2 if span > 5 else None, temp_ticks=5 if span > 5 else 0.5,
+                                    time_ticks=5000 if track["time"].max() > 10000 else None)
+        ax.set_title(f"Step-averaged tracking (real data, {STEP_C:g} °C bins, {label})", fontsize=10)
         _save(fig, outdir / "fig9_staircase_3C.png")
         steps.round(3).to_csv(outdir / "staircase_plateaus.csv", index=False)
         written += ["fig9_staircase_3C.png", "staircase_plateaus.csv"]

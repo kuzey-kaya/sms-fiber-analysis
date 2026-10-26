@@ -126,6 +126,32 @@ It is a continuous cooldown — no setpoint steps.
   behind), dashed straight fit from the tiles; on a continuous run every frame is a point. CLI `scripts/igor_findpeak.py --range/--points --min/--max --box`;
   tests `tests/test_findpeak.py`, `test_app.py::_check_strain_file`. Same day: the drawn-lines
   default on a continuous run went 1 → 5 frames (step runs stay at 9), fits untouched.
+- 2026-10-26 (owner: "examine every dataset uploaded so far everywhere, fix the problems, make it work
+  like Igor; find Igor's source files and bring its features in"). Datasets: only two distinct raw
+  runs exist on the machine (md5): the cooldown (6 copies: `data_fiber.csv`, `sms-data-2024-10-17.csv`,
+  `smsdata20241017.csv` …) and the strain run; `Downloads/all_peaks_from_all_rows.csv`,
+  `all_tracked_peaks.csv` (Colab era, Prominence 0.1 / Distance 20, "Upward/Downward") and
+  `data_tracked_long.csv` are old outputs, not data. Igor sources: no `.ipf`/`.pxp` anywhere and no
+  Igor install; the advisor's procedure is only ever seen in his screen recording
+  (`Downloads/video1641209203.mp4`, experiment `sms-strain-2026-10-15-analysis`, Igor Pro 6.37):
+  `trackpeaknew("n", 1, 1, 914, wave0, "min1489", temp, tim, 274, 353, -1)`, waves `peakmin1555` /
+  `timemin1555` / `tempmin1555` / `shift1555` / `mass`, `display shift1555 vs mass`, `ModifyGraph
+  mode=4,marker=8`, `Label bottom "Mass (grams)"`, `display n1, n850 vs wave0`, and the cursor info
+  panel (A pnt 774 X 2793.57 Y 1552.94; B pnt 832 X 3004.05 Y 1557.9996; dX 210.48 dY 5.057). The four
+  WhatsApp videos of 2026-10-22 are his slides (phase unwrapping; 0 strain Δφ(1555)−Δφ(1575) ≈ 10π,
+  7120 µε ≈ 12π; the PTL local fit) plus FringeLab and Overleaf on screen — no code. Brought in:
+  `sms_analysis/igor_export.py` (Igor Text `.itx` writer: `igor_text`, `wave_name`, `track_names` =
+  the advisor's names, `spectra_itx` wave0/n<k>/tim/temp, `tracks_itx`, `findpeak_itx`,
+  `parse_igor_text`; buttons in the FindPeak tab and the Export tab), `cursor_panel` + `igor_figure(
+  cursors=)` (Igor's info panel under the FindPeak graph and the one-fringe Igor view; defaults A in
+  the first plateau, B in the last loaded one), the "Overlay the first spectrum" checkbox
+  (`spec_first_<key>`), and `sms_analysis/auto.py` (`choose`: the app's first-look rules for the
+  scripts — tracker, reference fringe, load steps with 50 g defaults) used by `staircase_views.py`
+  (fig9 on a file without dip@1542.3; `staircase_bin` survives a run narrower than one bin) and
+  `igor_findpeak.py` (no `--range`/`--points` → automatic fringe + box, `--fringe LABEL`; load-step
+  runs report pm/g and plateau noise). Sweeps: every script on both files (the two crashes above were
+  the only ones), headless app over every tab/toggle on both files (no exception, no NaN text; the one
+  find, cursors on an unlocked frame, fixed). Tests `tests/test_igor_export.py`, `tests/test_auto.py`.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,

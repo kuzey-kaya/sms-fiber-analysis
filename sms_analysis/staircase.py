@@ -29,10 +29,19 @@ def staircase_bin(track: pd.DataFrame, step_c: float = 3.0) -> pd.DataFrame:
     DataFrame with one row per plateau: t_start, t_end (s), temp_mean,
     wavelength_mean, wavelength_std, n_points.
     """
-    ok = track.dropna(subset=["wavelength"]).reset_index(drop=True)
-    t_hi = np.ceil(ok["temperature"].max() / step_c) * step_c
-    t_lo = np.floor(ok["temperature"].min() / step_c) * step_c
-    edges = np.arange(t_hi, t_lo - step_c / 2, -step_c)  # descending for a cooldown
+    ok = track.dropna(subset=["wavelength", "temperature"]).reset_index(drop=True)
+    if ok.empty:
+        return pd.DataFrame(columns=["t_start", "t_end", "temp_mean", "wavelength_mean", "wavelength_std",
+                                     "n_points"])
+    t_max, t_min = float(ok["temperature"].max()), float(ok["temperature"].min())
+    if not np.isfinite(step_c) or step_c <= 0 or t_max - t_min < step_c:
+        # the run spans less than one bin (a load run at constant temperature, 2026-10-26): one
+        # plateau holding every frame instead of an empty arange
+        edges = np.array([t_max + 1e-9, t_min - 1e-9])
+    else:
+        t_hi = np.ceil(t_max / step_c) * step_c
+        t_lo = np.floor(t_min / step_c) * step_c
+        edges = np.arange(t_hi, t_lo - step_c / 2, -step_c)  # descending for a cooldown
 
     rows = []
     for hi, lo in zip(edges[:-1], edges[1:]):

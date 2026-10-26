@@ -73,7 +73,7 @@ Manual alternative: `pip install -r requirements.txt`, then `python launch.py`.
 | tab | content |
 |---|---|
 | Spectral map | the whole run as a wavelength × time heatmap (fig3), with the tracked fringes overlaid; vertical axis can be time, spectrum number or the condition; can also show the change from the first spectrum or each spectrum scaled 0–1 |
-| Spectrum & peaks | any single spectrum with its detected peaks/dips; optional overlay of evenly spaced spectra |
+| Spectrum & peaks | any single spectrum with its detected peaks/dips; optional overlay of evenly spaced spectra and of the first spectrum (Igor's `display n1, n850 vs wave0`) |
 | Fringe tracking | shift of every tracked fringe; one fringe in detail in the Igor style with its calibration — linear and/or quadratic fit with the residuals, local sensitivity at both ends of the run |
 | Sensitivity | sensitivity of every fringe vs wavelength, and the fringe table with the linear and quadratic RMSE and the local sensitivity at the coldest and warmest temperature |
 
@@ -150,7 +150,18 @@ advisor's Igor graphs — V_PeakLoc (red) with the condition (blue) against time
 and `display shift vs mass`: the shift from the first plateau with one open
 circle per load step and the straight fit — with found-%, sensitivity and, on a
 load run, the noise on the plateaus, plus FringeLab's own tracker on the same fringe for
-comparison. Script: `python scripts/igor_findpeak.py data/strain.csv --points 735 766 --min`.
+comparison. Under the Igor graph sits Igor's info panel: cursors A (round) and B (square)
+by point number with X, Y and dX, dY, the way a step height is read off an Igor graph
+(also on the one-fringe Igor view of the Fringe tracking tab). The track downloads as
+CSV or as an **Igor Text file** (`.itx`) whose waves carry the advisor's own names —
+`peakmin1576a`, `timemin1576a`, `tempmin1576a`, `shift1576a`, `mass` — so `display
+peakmin1576a vs timemin1576a` works in Igor as is; the Export tab adds the tracked
+fringes (`peakmin1552`-style waves + `tim`, `temp`, `mass`) and the spectra themselves
+(`wave0`, `n0`, `n1`, … + `tim`, `temp`, the inputs of his `trackpeaknew`) as `.itx`
+(`sms_analysis/igor_export.py`; Igor: *File → Load Waves → Load Igor Text*).
+Script: `python scripts/igor_findpeak.py data/strain.csv` (no range given: the app's
+automatic fringe and box, and on a load-step run the mass per plateau, 50 g steps
+assumed), `--fringe dip@1574.0`, or the advisor's call `--points 735 766 --min`.
 Checked 2026-10-23: points 735–766 of the strain file = 1572.0–1578.2 nm, the
 1576 nm dip steps 1574.0 → 1576.6 nm exactly as on the advisor's screen (plateau
 noise 24 pm at box 5, 80 pm unsmoothed, 12 pm at box 11); the cooldown's 1493 nm
@@ -356,7 +367,7 @@ python scripts/spectral_3d.py      # fig18-19: 3-D views (+ interactive HTML wit
 | `fig5_correlation.png` | wavelength vs temperature with linear fit |
 | `fig6_sensitivity_map.png` | sensitivity of every fringe vs wavelength |
 | `fig7_igor_style.png` | the tracking graph rendered in the Igor Pro house style |
-| `fig9_staircase*.png` | tracked fringe averaged in 3 °C / 2 °C temperature bins, drawn as plateaus (`scripts/staircase_views.py` writes `fig9_staircase_3C.png`: dip starting at 1542.3 nm, 3 °C bins) |
+| `fig9_staircase*.png` | tracked fringe averaged in 3 °C / 2 °C temperature bins, drawn as plateaus (`scripts/staircase_views.py` writes `fig9_staircase_3C.png`: dip starting at 1542.3 nm, 3 °C bins; on a file where that fringe is not tracked it takes the app's automatic choice, `sms_analysis/auto.py`) |
 | `fig10_legacy_*.png` | exact reproduction of the original Colab tracking (with its fringe-hop step at t ≈ 7660 s); `scripts/staircase_views.py` writes `fig10_legacy_igor.png` |
 | `fig11_multistep_*.png` | legacy tracker with a wider window + median filter (several fringe-hop steps); `scripts/staircase_views.py` writes `fig11_multistep_igor.png` (8 nm window, median 15) |
 | `fig12_*.png` | strongest extremum inside a fixed band (`track_band_extremum`): identity hops between fringes → staircase; `scripts/staircase_views.py` writes `fig12_desc_med7.png` (strongest peak in 1475–1535 nm, median 7) |

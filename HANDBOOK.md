@@ -171,8 +171,15 @@ GitHub's free monthly allowance is limited.
   group's `trackpeaknew` does it. Pick a fringe from the list — range, minimum or
   maximum and the box width are set for you — and you get Igor's two graphs
   (peak wavelength against time, and *shift vs mass* with one point per load
-  step) and a CSV; *Set by hand* takes a range in nm or Igor point numbers
-  (e.g. 735 and 766).
+  step), Igor's cursor panel (A and B by point number, dX and dY) and the track
+  as CSV or as an Igor Text file; *Set by hand* takes a range in nm or Igor point
+  numbers (e.g. 735 and 766).
+- **Back into Igor:** every `.itx` file FringeLab offers (FindPeak track, tracked
+  fringes and the spectra on the Export tab) loads with *File → Load Waves → Load
+  Igor Text*. The waves are named the way the group's experiment names them
+  (`peakmin1576a`, `timemin1576a`, `tempmin1576a`, `shift1576a`, `mass`; `wave0`,
+  `n0`, `n1`, …, `tim`, `temp`), so the usual `display … vs …` commands and
+  `trackpeaknew(...)` run on them unchanged.
 - **Phase readout, and how to check the local fit:** on the Phase tab turn on
   *Compute the phase readout*. The box *How much better is the local fit?* shows
   the readout computed two ways on the same frames — the cubic through the
