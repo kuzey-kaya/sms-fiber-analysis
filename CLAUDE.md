@@ -152,6 +152,12 @@ It is a continuous cooldown — no setpoint steps.
   runs report pm/g and plateau noise). Sweeps: every script on both files (the two crashes above were
   the only ones), headless app over every tab/toggle on both files (no exception, no NaN text; the one
   find, cursors on an unlocked frame, fixed). Tests `tests/test_igor_export.py`, `tests/test_auto.py`.
+  2026-10-27 (owner saw the strain file's temperature trace "very noisy" in the Igor view and asked
+  whether Igor would show the same): it is the file's own thermometer column (21.7–22.7 °C, 0.01 °C
+  frame to frame, 0.3 °C drops at frames 162/312/476 when the load was handled, slow 0.8 °C warming);
+  the advisor's graph draws the same wave flat because `SetAxis/A/E=1 right` autoscales from zero →
+  `igor_figure(from_zero=)` + checkbox "Right axis from 0 (Igor SetAxis/A/E=1)" (`fp_<key>_zero`,
+  `igor_zero_<key>`), default on for load-step runs, off = the axis fits the data range.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,

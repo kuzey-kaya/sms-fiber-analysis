@@ -591,9 +591,11 @@ def shifts_figure(tracks, x_mode, cond_title):
     return fig
 
 
-def igor_figure(track, has_cond, cond_title, cursors=None):
+def igor_figure(track, has_cond, cond_title, cursors=None, from_zero=False):
     """Tracked wavelength (red, left) and condition (blue, right) vs time. ``cursors`` = (pntA, pntB):
-    Igor's round (A) and square (B) cursors drawn on the wavelength trace."""
+    Igor's round (A) and square (B) cursors drawn on the wavelength trace. ``from_zero``: the right
+    axis starts at 0 like the advisor's ``SetAxis/A/E=1 right`` (autoscale including zero), which is
+    what makes a 22 °C thermometer trace with 0.3 °C wobbles look flat on his graphs."""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Scatter(x=track["time"], y=track["wavelength"], mode="lines",
                              name="wavelength", line=dict(color=RED, width=1.6),
@@ -603,6 +605,12 @@ def igor_figure(track, has_cond, cond_title, cursors=None):
                                  name=cond_title, line=dict(color=BLUE, width=1.6)),
                       secondary_y=True)
         fig.update_yaxes(title_text=cond_title, color=BLUE, showgrid=False, secondary_y=True)
+        if from_zero:
+            c_max = float(np.nanmax(track["temperature"].to_numpy(float)))
+            c_min = float(np.nanmin(track["temperature"].to_numpy(float)))
+            lo = 0.0 if c_min >= 0 else c_min * 1.05
+            hi = c_max * 1.05 if c_max > 0 else 0.0
+            fig.update_yaxes(range=[lo, hi], secondary_y=True)
     if cursors is not None:
         t = track["time"].to_numpy(float)
         w = track["wavelength"].to_numpy(float)
@@ -1730,9 +1738,15 @@ with tab_track:
                                   horizontal=True, key=f"igor_axis_{data_key}", label_visibility="collapsed")
                 if axis != cond_title:
                     igor_track, igor_title = track_d.assign(temperature=file_cond), file_cond_title
+            zero_tr = left.checkbox("Right axis from 0 (Igor SetAxis/A/E=1)", value=bool(is_steps),
+                                        key=f"igor_zero_{data_key}",
+                                        help="Igor's autoscale-including-zero, as in the advisor's graphs: a 22 °C "
+                                             "temperature with 0.3 °C wobbles then draws as a flat line. Off = the "
+                                             "axis fits the data range and shows the wobbles.")
             with left:
                 cur_tr = cursor_panel(igor_track, f"igor_{data_key}", igor_title, _plat)
-            left.plotly_chart(igor_figure(igor_track, has_cond, igor_title, cursors=cur_tr), width="stretch")
+            left.plotly_chart(igor_figure(igor_track, has_cond, igor_title, cursors=cur_tr, from_zero=zero_tr),
+                              width="stretch")
             left.caption("Igor-style view: tracked wavelength (red, left axis) and "
                          f"{igor_title} (blue, right axis) against time.")
         if len(chosen) == 1 and has_cond:
@@ -1863,8 +1877,13 @@ with tab_igor:
             igor_title_fp = cond_title
     else:
         igor_title_fp = cond_title
+    zero_fp = st.checkbox("Right axis from 0 (Igor SetAxis/A/E=1)", value=bool(is_steps),
+                                key=f"{fk}_zero",
+                                help="Igor's autoscale-including-zero, as in the advisor's graphs: a 22 °C "
+                                     "temperature with 0.3 °C wobbles then draws as a flat line. Off = the "
+                                     "axis fits the data range and shows the wobbles.")
     cur_fp = cursor_panel(igor_fp, f"{fk}_cur", igor_title_fp, _plat)
-    st.plotly_chart(igor_figure(igor_fp, has_cond, igor_title_fp, cursors=cur_fp), width="stretch")
+    st.plotly_chart(igor_figure(igor_fp, has_cond, igor_title_fp, cursors=cur_fp, from_zero=zero_fp), width="stretch")
     st.caption(f"Igor's graph: V_PeakLoc (red, left) and {igor_title_fp} (blue, right) against time; "
                f"lines drawn {_drawn}. A frame whose range holds no such extremum is a gap — widen the "
                "range or move it when that happens, as in Igor.")

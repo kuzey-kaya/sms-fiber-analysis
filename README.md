@@ -150,7 +150,9 @@ advisor's Igor graphs — V_PeakLoc (red) with the condition (blue) against time
 and `display shift vs mass`: the shift from the first plateau with one open
 circle per load step and the straight fit — with found-%, sensitivity and, on a
 load run, the noise on the plateaus, plus FringeLab's own tracker on the same fringe for
-comparison. Under the Igor graph sits Igor's info panel: cursors A (round) and B (square)
+comparison. The right axis can start at 0 like the advisor's `SetAxis/A/E=1 right`
+(default on load-step runs: a 22 °C thermometer with 0.3 °C wobbles then draws flat, as
+on his graphs; off shows the wobbles). Under the Igor graph sits Igor's info panel: cursors A (round) and B (square)
 by point number with X, Y and dX, dY, the way a step height is read off an Igor graph
 (also on the one-fringe Igor view of the Fringe tracking tab). The track downloads as
 CSV or as an **Igor Text file** (`.itx`) whose waves carry the advisor's own names —

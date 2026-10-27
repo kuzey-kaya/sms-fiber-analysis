@@ -170,6 +170,10 @@ def _check_strain_file(at):
     assert cur and cur[0]["cursor"].tolist() == ["A", "B", "B − A"]
     assert abs(cur[0]["Y (nm)"].iloc[2]) > 1.0                          # dip@1491 moves > 1 nm by the last step
     # Igor Text downloads: FindPeak track with the advisor's names, tracks and spectra in Export
+    zero = [c for c in at.checkbox if c.label.startswith("Right axis from 0")]
+    assert len(zero) == 2 and all(c.value for c in zero)                # on by default on a load-step run
+    zero[0].set_value(False).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
     names = [b.label for b in at.get("download_button")]
     assert "Igor waves (.itx)" in names and "Tracked fringes (.itx)" in names
     assert any(n.startswith("Spectra (.itx") for n in names)

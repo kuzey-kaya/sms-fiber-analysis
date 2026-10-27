@@ -171,7 +171,9 @@ GitHub's free monthly allowance is limited.
   group's `trackpeaknew` does it. Pick a fringe from the list — range, minimum or
   maximum and the box width are set for you — and you get Igor's two graphs
   (peak wavelength against time, and *shift vs mass* with one point per load
-  step), Igor's cursor panel (A and B by point number, dX and dY) and the track
+  step), *Right axis from 0* (Igor's `SetAxis/A/E=1`, on by default for load runs —
+  the file's temperature then looks as flat as on the advisor's graphs), Igor's cursor
+  panel (A and B by point number, dX and dY) and the track
   as CSV or as an Igor Text file; *Set by hand* takes a range in nm or Igor point
   numbers (e.g. 735 and 766).
 - **Back into Igor:** every `.itx` file FringeLab offers (FindPeak track, tracked
