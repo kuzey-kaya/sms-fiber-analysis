@@ -434,9 +434,9 @@ scripts/
 
 - 22 of 24 fringes tracked over the full run with R² ≥ 0.90 (most ≥ 0.997).
 - Sign flip across λc ≈ 1525 nm: −88…−320 pm/°C below, +115…+403 pm/°C above.
-- Fringe near 1493 nm: **−141 pm/°C**, matching the −142 pm/°C published for
-  ~1495 nm in the group's inline-SMS paper — a good cross-check that the
-  Python pipeline reproduces the Igor analysis.
+- Fringe near 1493 nm: **−141 pm/°C**, consistent with the −142 pm/°C published
+  for ~1495 nm in the group's inline-SMS paper (a separate measurement analyzed
+  in Igor Pro), a good cross-check of the Python pipeline.
 - Most sensitive reliably-tracked fringe: dip starting at 1542.3 nm,
   **+359 pm/°C**, R² = 0.997 over the full 21 °C range.
 - The calibration of that fringe is visibly curved: a quadratic fit halves the
