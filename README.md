@@ -444,3 +444,13 @@ scripts/
   22.8 °C falling to +283 pm/°C at 44.1 °C — the fringe moves toward the
   critical wavelength as it cools, so its sensitivity grows. Fringes far from
   λc (e.g. the dip at 1567.7 nm) are linear to within the noise.
+
+## Use of AI tools
+
+I want to be transparent about how this project was built.
+
+- **How the code was written:** I developed this project together with an AI coding assistant (Claude, by Anthropic). Both the analysis code and the FringeLab interface were written in collaboration with it, based on my prompts and requirements.
+- **My role:** I decided what the analysis needed to do and made the scientific decisions, for example tracking each fringe individually because of the critical-wavelength behavior, and checking the results against the group's published sensitivity. I reviewed all of the code from start to finish.
+- **Commits:** Many changes were committed and pushed by Claude, which is why many commits appear under its name. The `.claude/` folder and `CLAUDE.md` are configuration files for that assistant.
+
+If you have questions about any part of the code, feel free to contact me.
