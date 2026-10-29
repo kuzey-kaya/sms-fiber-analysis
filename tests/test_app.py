@@ -191,3 +191,22 @@ def _check_strain_file(at):
     smooth_box = [c for c in at.checkbox if c.label == "Draw the smoothed spectrum"]
     fit_box = [c for c in at.checkbox if c.label == "Width-fit the peaks and dips"]
     assert smooth_box[0].value and fit_box[0].value                           # noisy, width-fit run
+
+
+def test_phase_movie_uses_the_same_default_pair_as_the_phase_tab():
+    """2026-10-30: with the strain run, the phase movie built before the Phase tab was ever opened
+    showed the paper's 1545/1570 nm while the Phase tab would start at 1565/1590 nm."""
+    strain = Path(APP).parent / "data" / "strain.csv"
+    if not strain.exists():
+        pytest.skip("data/strain.csv not present")
+    os.environ["FRINGELAB_EXAMPLE"] = str(strain)
+    try:
+        at = AppTest.from_file(APP, default_timeout=300).run()
+        assert not at.toggle(key="phase_compute").value                 # the Phase tab is untouched
+        at.radio(key="movie_kind").set_value("Phase readout (SM1E.2)").run()
+        at.toggle(key="movie_build").set_value(True).run()
+        assert not at.exception, [str(e.value) for e in at.exception]
+        assert any("readout |φ(1590 nm) − φ(1565 nm)|" in c.value for c in at.caption)
+        assert at.session_state["phase_a"] == 1565.0 and at.session_state["phase_b"] == 1590.0
+    finally:
+        os.environ.pop("FRINGELAB_EXAMPLE", None)

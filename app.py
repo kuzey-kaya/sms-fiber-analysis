@@ -1984,6 +1984,52 @@ with tab_sens:
                        f"S at max {cond_unit} (pm)": st.column_config.NumberColumn(format="%+.0f")})
 
 # ---- phase unwrapping (SM1E.2) ---------------------------------------------
+def default_phase_pair(data, fits_p, data_key):
+    """The wavelength pair the Phase tab and the phase movie start from, decided once per file and
+    kept in session state (``phase_pair_<key>``, mirrored into the ``phase_a``/``phase_b`` widgets).
+
+    The paper's 1545/1570 nm, unless the local fit cannot be anchored there on this run: then a walk
+    outward from λc on a 5 nm grid, right side first, taking the first wavelength that works with its
+    partner 25 nm further out. A wavelength is judged on 24 frames spread over the whole run, not on
+    the first one only (2026-10-29, checked against the advisor's papers on the strain run: at 1560 nm
+    the local fit was fine until the heaviest load, when the broad fringes next to λc had moved into
+    its window and the readout turned the wrong way on that one step). It passes when, on every
+    sampled frame, its window keeps EDGE_CLEARANCE local periods from λc measured at the window edge
+    (phase.window_clearance) and the local fit converges; 1565 nm and beyond do on the strain run,
+    1545/1570 still passes on the cooldown. 2026-10-30: the phase movie used to fall back to the
+    paper's pair when the Phase tab had not been opened first — it now calls this too."""
+    pair_key = f"phase_pair_{data_key}"
+    if pair_key in st.session_state:
+        return st.session_state[pair_key]
+    wl_min, wl_max = float(data.wavelengths.min()), float(data.wavelengths.max())
+    fit0 = next((f for f in fits_p if f is not None), None)
+    if fit0 is None:
+        return None
+    lam_c = fit0.lambda_c if np.isfinite(fit0.lambda_c) else 0.5 * (wl_min + wl_max)
+    sample = sorted({int(i) for i in np.linspace(0, len(data) - 1, 24)})
+    frames_w = [i for i in sample if fits_p[i] is not None]
+
+    def anchored(lam):
+        for i in frames_w:
+            if not window_clearance(data.wavelengths, fits_p[i], lam) >= EDGE_CLEARANCE:
+                return False
+            lf = local_fit(data.wavelengths, data.spectra[i], fits_p[i], lam)
+            if lf is None or not lf.converged:
+                return False
+        return True
+
+    def works(a, b):
+        return wl_min <= a < b <= wl_max and anchored(a) and anchored(b)
+
+    cands = [(PAPER_LAMBDA_A, PAPER_LAMBDA_B)]
+    cands += [(a_, a_ + 25.0) for a_ in np.arange(5 * np.ceil((lam_c + 15) / 5), wl_max - 25, 5.0)]
+    cands += [(b_ - 25.0, b_) for b_ in np.arange(5 * np.floor((lam_c - 15) / 5), wl_min + 25, -5.0)]
+    chosen = next((c_ for c_ in cands if works(*c_)), cands[0])
+    st.session_state[pair_key] = (float(np.clip(chosen[0], wl_min, wl_max)), float(np.clip(chosen[1], wl_min, wl_max)))
+    st.session_state["phase_a"], st.session_state["phase_b"] = st.session_state[pair_key]
+    return st.session_state[pair_key]
+
+
 with tab_phase:
     st.markdown("**Phase-unwrapping readout** (Salik et al., Optica Sensing Congress 2025, SM1E.2). "
                 "The extrema on either side of the critical wavelength are numbered λ±1, λ±2, …; "
@@ -2012,41 +2058,7 @@ with tab_phase:
     else:
         wl_min, wl_max = float(data.wavelengths.min()), float(data.wavelengths.max())
         pair_key = f"phase_pair_{data_key}"
-        if pair_key not in st.session_state:
-            # The paper's 1545/1570 nm, unless the local fit cannot work there on this run (a window
-            # holding λc or leaving the band): then 25 and 50 nm to the right of λc, or to the left.
-            lam_c = fit0_p.lambda_c if np.isfinite(fit0_p.lambda_c) else 0.5 * (wl_min + wl_max)
-            # Judge a wavelength on frames spread over the whole run, not on the first one only
-            # (2026-10-29, checked against the advisor's papers on the strain run): at 1560 nm the
-            # local fit was fine until the heaviest load, when the broad fringes next to λc had
-            # moved into its window — the fit's residual doubled and the readout turned the wrong
-            # way on that one step. A wavelength passes when, on every sampled frame, its window keeps
-            # EDGE_CLEARANCE local periods from λc measured at the window edge (phase.window_clearance)
-            # and the local fit converges; 1565 nm and beyond do, 1545/1570 still passes on the cooldown.
-            sample = sorted({int(i) for i in np.linspace(0, len(data) - 1, 24)})
-            frames_w = [i for i in sample if fits_p[i] is not None]
-
-            def anchored(lam):
-                for i in frames_w:
-                    if not window_clearance(data.wavelengths, fits_p[i], lam) >= EDGE_CLEARANCE:
-                        return False
-                    lf = local_fit(data.wavelengths, data.spectra[i], fits_p[i], lam)
-                    if lf is None or not lf.converged:
-                        return False
-                return True
-
-            def works(a, b):
-                return wl_min <= a < b <= wl_max and anchored(a) and anchored(b)
-
-            # the paper's pair first; else walk outward from λc on a 5 nm grid, right side then left,
-            # and take the first wavelength whose local fit works, with its partner 25 nm further out
-            cands = [(PAPER_LAMBDA_A, PAPER_LAMBDA_B)]
-            cands += [(a_, a_ + 25.0) for a_ in np.arange(5 * np.ceil((lam_c + 15) / 5), wl_max - 25, 5.0)]
-            cands += [(b_ - 25.0, b_) for b_ in np.arange(5 * np.floor((lam_c - 15) / 5), wl_min + 25, -5.0)]
-            chosen_pair = next((c_ for c_ in cands if works(*c_)), cands[0])
-            st.session_state[pair_key] = (float(np.clip(chosen_pair[0], wl_min, wl_max)),
-                                          float(np.clip(chosen_pair[1], wl_min, wl_max)))
-            st.session_state["phase_a"], st.session_state["phase_b"] = st.session_state[pair_key]
+        default_phase_pair(data, fits_p, data_key)
         c = st.columns([1.2, 1.2, 2])
         la = c[0].number_input("Wavelength a (nm)", wl_min, wl_max, step=0.5, key="phase_a")
         lb = c[1].number_input("Wavelength b (nm)", wl_min, wl_max, step=0.5, key="phase_b")
@@ -2216,11 +2228,13 @@ with tab_movie:
                     "readout up to the current time. Watch the extremum at λc change type when a new pair "
                     "of extrema is born there — the readout does not jump. The wavelength pair is the one "
                     "chosen in the Phase tab.")
-        la_m = float(st.session_state.get("phase_a", PAPER_LAMBDA_A))
-        lb_m = float(st.session_state.get("phase_b", PAPER_LAMBDA_B))
         # the phase fits are computed only once the movie is asked for (same cache as the Phase tab)
         fits_m = (phase_fits_cached(data, data_key, prominence, distance, smooth_window)
                   if build_movie else [None] * len(data))
+        if build_movie and f"phase_pair_{data_key}" not in st.session_state:
+            default_phase_pair(data, fits_m, data_key)      # same choice as the Phase tab would make
+        la_m = float(st.session_state.get("phase_a", PAPER_LAMBDA_A))
+        lb_m = float(st.session_state.get("phase_b", PAPER_LAMBDA_B))
         if not build_movie:
             pass
         elif not any(f is not None for f in fits_m):

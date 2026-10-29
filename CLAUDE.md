@@ -180,6 +180,12 @@ It is a continuous cooldown — no setpoint steps.
   `EDGE_CLEARANCE` = 0.4; strain 1560 → 0.20, 1545 → 0.25 rejected, 1565 → 0.51 ok, cooldown 1545 → 0.48
   ok) plus a converging local fit → strain default 1565/1590; 1545/1570 stays on the cooldown. An RMS-ratio
   rule was tried first and rejected the cooldown's 1570 (RMS 2× at the band edge) — not used.
+  2026-10-30 (owner: "check the Movie tab with both datasets"): both movies build and play on both
+  files on the live site; one inconsistency found — the phase movie read `phase_a`/`phase_b` and fell
+  back to the paper's 1545/1570 when the Phase tab had never been opened, while the Phase tab would
+  start at 1565/1590 on the strain run. The pair walk is now `default_phase_pair(data, fits, key)`
+  (module level, stores `phase_pair_<key>` + the widget keys) and the phase movie calls it when the
+  key is missing. Test `test_phase_movie_uses_the_same_default_pair_as_the_phase_tab`.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,
