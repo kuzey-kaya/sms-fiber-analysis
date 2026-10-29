@@ -37,7 +37,8 @@ from sms_analysis.peaks import smooth
 from sms_analysis.tracking import flicker_fraction, refine_width_fit
 from sms_analysis.io import SpectraSet
 from sms_analysis.movie import frame_rows, render_movie, render_phase_movie
-from sms_analysis.phase import (PAPER_LAMBDA_A, PAPER_LAMBDA_B, local_fit, phase_fits, phase_sensitivity,
+from sms_analysis.phase import (EDGE_CLEARANCE, PAPER_LAMBDA_A, PAPER_LAMBDA_B, local_fit, phase_fits, phase_sensitivity,
+                                window_clearance,
                                 phase_series, scan_pairs, tracked_phase_change)
 from sms_analysis.steps import (classify_plateaus, default_step_values, detect_plateaus, robust_jitter,
                                 step_condition)
@@ -2014,13 +2015,28 @@ with tab_phase:
         if pair_key not in st.session_state:
             # The paper's 1545/1570 nm, unless the local fit cannot work there on this run (a window
             # holding λc or leaving the band): then 25 and 50 nm to the right of λc, or to the left.
-            i0 = next(i for i, f in enumerate(fits_p) if f is not None)
             lam_c = fit0_p.lambda_c if np.isfinite(fit0_p.lambda_c) else 0.5 * (wl_min + wl_max)
+            # Judge a wavelength on frames spread over the whole run, not on the first one only
+            # (2026-10-29, checked against the advisor's papers on the strain run): at 1560 nm the
+            # local fit was fine until the heaviest load, when the broad fringes next to λc had
+            # moved into its window — the fit's residual doubled and the readout turned the wrong
+            # way on that one step. A wavelength passes when, on every sampled frame, its window keeps
+            # EDGE_CLEARANCE local periods from λc measured at the window edge (phase.window_clearance)
+            # and the local fit converges; 1565 nm and beyond do, 1545/1570 still passes on the cooldown.
+            sample = sorted({int(i) for i in np.linspace(0, len(data) - 1, 24)})
+            frames_w = [i for i in sample if fits_p[i] is not None]
+
+            def anchored(lam):
+                for i in frames_w:
+                    if not window_clearance(data.wavelengths, fits_p[i], lam) >= EDGE_CLEARANCE:
+                        return False
+                    lf = local_fit(data.wavelengths, data.spectra[i], fits_p[i], lam)
+                    if lf is None or not lf.converged:
+                        return False
+                return True
 
             def works(a, b):
-                return (wl_min <= a < b <= wl_max and
-                        local_fit(data.wavelengths, data.spectra[i0], fit0_p, a) is not None and
-                        local_fit(data.wavelengths, data.spectra[i0], fit0_p, b) is not None)
+                return wl_min <= a < b <= wl_max and anchored(a) and anchored(b)
 
             # the paper's pair first; else walk outward from λc on a 5 nm grid, right side then left,
             # and take the first wavelength whose local fit works, with its partner 25 nm further out
@@ -2035,8 +2051,9 @@ with tab_phase:
         la = c[0].number_input("Wavelength a (nm)", wl_min, wl_max, step=0.5, key="phase_a")
         lb = c[1].number_input("Wavelength b (nm)", wl_min, wl_max, step=0.5, key="phase_b")
         if tuple(st.session_state[pair_key]) != (PAPER_LAMBDA_A, PAPER_LAMBDA_B) and (la, lb) == tuple(st.session_state[pair_key]):
-            c[2].caption(f"Pair moved to {la:g}/{lb:g} nm: the paper's 1545/1570 nm straddles this run's "
-                         f"λc ≈ {fit0_p.lambda_c:.0f} nm, where the local fit cannot be anchored.")
+            c[2].caption(f"Pair moved to {la:g}/{lb:g} nm: on this run the local fit cannot be anchored at the "
+                         f"paper's 1545/1570 nm on every frame (λc ≈ {fit0_p.lambda_c:.0f} nm; under the heaviest "
+                         "loads the broad fringes next to λc reach the nearer windows).")
         PHASE_METHODS = ["Auto (the less noisy of the two)", "Local two-mode fit (PTL)", "Cubic only"]
         phase_method = c[2].radio(
             "Phase at λa and λb from", PHASE_METHODS, key="phase_method", horizontal=True,

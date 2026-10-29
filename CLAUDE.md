@@ -158,6 +158,28 @@ It is a continuous cooldown — no setpoint steps.
   the advisor's graph draws the same wave flat because `SetAxis/A/E=1 right` autoscales from zero →
   `igor_figure(from_zero=)` + checkbox "Right axis from 0 (Igor SetAxis/A/E=1)" (`fp_<key>_zero`,
   `igor_zero_<key>`), default on for load-step runs, off = the axis fits the data range.
+  2026-10-29 (owner: "check that the site agrees with the advisor's previous work"). Papers on the
+  machine: Salik 2025 SM1E.2 (`Downloads/salik-optica-sensing-sensors-2025-sm1e.2-as-published.pdf`),
+  Chen 2025 JM4A.8, Cong 2025 JM4A.11 (`cong-optica-sensing-sensors-2025-jm4a.11.pdf`: free SMS sensor
+  −7.115 ± 0.056 pm/µε at 10 g steps, temperature −0.119 nm/K, 6-fold more once glued to a substrate),
+  the PTL manuscript. Checked: Chen −0.142 nm/°C near 1495 nm vs our −0.141 (cooldown) ✓; paper λc
+  1524 nm vs ours 1525.2 (cooldown) / 1522.4 (strain) ✓; the paper's strain experiment is NOT our
+  strain file (theirs: +50 g every 5 min up to 650 g = 7120 µε, i.e. 10.95 µε/g, spectra every 5 s,
+  fringes 4 nm apart between 1555–1575 — ours: load on/off 8×, 0.2 nm sampling, fringes ~11 nm
+  apart, so no numeric match is expected: their 1555/1575 readout changes ≈ 2π over 650 g = 9.7
+  mrad/g and their 1545 peak moves 68 pm/g (slide), ours 0.43 mrad/g and 11.8 pm/g — 0.14 vs 0.036
+  rad per nm of peak shift, a different fringe density, not a bug). Method claims reproduced on our
+  file: peak shifts are sublinear (increments 0.64 → 0.49 nm per 50 g on dip@1552.8, −23 %), the
+  phase readout is linear step to step (1565/1590 local: 0.020–0.027 rad per step, last step 3.2× =
+  the heavier mass, same as the peaks' 2.7×), the temperature wobble ±0.3 °C matches the paper's
+  24.4 ± 0.3 °C. Found and fixed: at 1560 nm the local fit was fine on frame 0 but under the heaviest
+  load the broad λc-side fringe (a new peak at 1543 nm, extrema 20 → 22) reached its window: RMS
+  0.0085 → 0.0141 and the readout went −0.015 rad on a step where the cubic and the peaks rose 3×.
+  The default-pair walk now judges a wavelength on 24 frames spread over the run with
+  `phase.window_clearance` (clearance from λc in *local periods measured at the window edge*, ≥
+  `EDGE_CLEARANCE` = 0.4; strain 1560 → 0.20, 1545 → 0.25 rejected, 1565 → 0.51 ok, cooldown 1545 → 0.48
+  ok) plus a converging local fit → strain default 1565/1590; 1545/1570 stays on the cooldown. An RMS-ratio
+  rule was tried first and rejected the cooldown's 1570 (RMS 2× at the band edge) — not used.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,
@@ -356,7 +378,9 @@ t1 ≈ 0.70–0.80, t2 ≈ 0.15–0.21. Two-cycle window (1, 1.5, 2, 3 tried); a
 it* is refused (strain run: 1555 nm, edge 0.17 period from λc, doubled the plateau noise; 1560 nm
 at 0.57 period cut it 7-fold; cooldown 1545 nm sits at 1.0 period and stays valid) and the frame
 keeps the cubic for *both* wavelengths; the app's default pair (`phase_pair_<key>`) walks outward
-from λc when the paper's pair is refused (strain → 1560/1585), and the Igor view offers the file's
+from λc when the paper's pair is refused (strain → 1565/1590 since 2026-10-29; a wavelength must keep
+`EDGE_CLEARANCE` from λc on 24 frames spread over the run — 1560 nm passed on frame 0 but failed under
+the heaviest load, see the 2026-10-29 note), and the Igor view offers the file's
 temperature (`file_cond`) on the right axis (`igor_axis_<key>`) — the owner compared our phase
 plot with Igor's "peakmin1555 vs timemin1555" graph (mixing one refined and one cubic
 phase put a ~0.15 rad offset into the readout — that is why 1545/1570 on the strain run stays

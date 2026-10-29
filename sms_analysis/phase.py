@@ -226,6 +226,45 @@ def _t1_t2_from_extrema(t_max: float, t_min: float) -> tuple[float, float]:
 LOCAL_CYCLES = 2.0     # window width in local fringe periods (checked 2026-10-22 on both runs)
 
 
+EDGE_CLEARANCE = 0.4   # periods, measured with the local period at the window edge (2026-10-29)
+
+
+def window_clearance(wavelengths: np.ndarray, fit: PhaseFit, lam: float,
+                     cycles: float = LOCAL_CYCLES) -> float:
+    """How far the local-fit window around ``lam`` stays from λc, in *local* fringe periods
+    measured at the window edge nearest λc (where the period is longest). NaN when the cubic
+    is unusable there, 0 when λc lies inside the window.
+
+    Why the edge and not ``lam`` (found 2026-10-29 while checking the site against the advisor's
+    papers): on the strain run the 1560 nm window kept 0.57 periods of clearance measured at
+    1560 nm on every frame, yet under the heaviest load the broad fringes next to λc had moved
+    into it (period at the edge ≈ 75 nm, clearance there 0.20) and the fit went wrong on that one
+    step; 1565 nm keeps ≥ 0.51 at the edge and stays linear. The cooldown's 1545 nm sits at 0.48.
+    The app's default-pair walk requires ≥ ``EDGE_CLEARANCE`` on frames spread over the run."""
+    wl = np.asarray(wavelengths, float)
+    c = fit.coefficients
+    slope = float(np.polyval(np.polyder(c), lam - fit.x0))
+    if not np.isfinite(slope) or abs(slope) < 1e-6:
+        return float("nan")
+    period = 2 * np.pi / abs(slope)
+    half = 0.5 * max(cycles, 1.0) * period
+    lo, hi = lam - half, lam + half
+    if lo < wl.min() or hi > wl.max():
+        half = 0.5 * period
+        lo, hi = lam - half, lam + half
+        if lo < wl.min() or hi > wl.max():
+            return float("nan")
+    if not np.isfinite(fit.lambda_c):
+        return float("inf")
+    if lo <= fit.lambda_c <= hi:
+        return 0.0
+    edge = lo if abs(lo - fit.lambda_c) < abs(hi - fit.lambda_c) else hi
+    s_edge = float(np.polyval(np.polyder(c), edge - fit.x0))
+    if not np.isfinite(s_edge) or abs(s_edge) < 1e-9:
+        return 0.0
+    return float(abs(edge - fit.lambda_c) * abs(s_edge) / (2 * np.pi))
+
+
 def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam: float,
               cycles: float = LOCAL_CYCLES, smooth_window: int = 11) -> LocalPhaseFit | None:
     """Refine the intermodal phase at ``lam`` by fitting Eq. 1 to the spectrum around it.

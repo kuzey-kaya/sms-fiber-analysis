@@ -47,6 +47,8 @@ def test_movie_and_phase_are_computed_on_request_only():
     at.toggle(key="phase_compute").set_value(True).run()
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("λc (first" in m.value for m in at.markdown)          # the phase tiles appeared
+    pair = at.session_state[[k for k in at.session_state if str(k).startswith("phase_pair_")][0]]
+    assert tuple(pair) == (1545.0, 1570.0)                           # the paper's pair holds on the cooldown
     assert at.radio(key="phase_method").value.startswith("Auto")       # both computed, the better one used
     assert any("Method in use" in m.value and "local two-mode fit" in m.value for m in at.markdown)
     cmp = [d.value for d in at.dataframe if "scatter (mrad)" in d.value.columns]
@@ -170,6 +172,10 @@ def _check_strain_file(at):
     assert cur and cur[0]["cursor"].tolist() == ["A", "B", "B − A"]
     assert abs(cur[0]["Y (nm)"].iloc[2]) > 1.0                          # dip@1491 moves > 1 nm by the last step
     # Igor Text downloads: FindPeak track with the advisor's names, tracks and spectra in Export
+    at.toggle(key="phase_compute").set_value(True).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    pair = at.session_state[[k for k in at.session_state if str(k).startswith("phase_pair_")][0]]
+    assert pair[0] >= 1565.0 and pair[1] - pair[0] == 25.0   # 1560 nm fails under the heaviest load (2026-10-29)
     zero = [c for c in at.checkbox if c.label.startswith("Right axis from 0")]
     assert len(zero) == 2 and all(c.value for c in zero)                # on by default on a load-step run
     zero[0].set_value(False).run()

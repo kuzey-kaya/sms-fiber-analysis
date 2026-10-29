@@ -72,3 +72,27 @@ def test_local_fit_refines_the_cooldown_readout(data, fits):
     assert lf is not None and lf.converged and lf.rms < 0.01
     assert abs(lf.phi - lf.phi_cubic) < 0.3                      # same branch as the cubic
     assert local_fit(data.wavelengths, data.spectra[0], f0, f0.lambda_c + 2.0) is None   # window holds λc
+
+
+def test_window_clearance_separates_the_strain_1560_case_from_the_cooldown_pair():
+    """2026-10-29: 1560 nm on the strain run keeps > 0.5 periods from lambda_c measured at 1560 nm on every
+    frame, but under the heaviest load the window's edge sits only 0.20 local periods from lambda_c;
+    1565 nm stays >= 0.5 and the cooldown's 1545 nm (the paper's pair) stays >= 0.4."""
+    import numpy as np
+    from pathlib import Path
+    from sms_analysis import load_sms_csv
+    from sms_analysis.phase import EDGE_CLEARANCE, phase_fits, window_clearance
+    root = Path(__file__).resolve().parents[1]
+    if not (root / "data" / "strain.csv").exists():
+        return
+    d = load_sms_csv(root / "data" / "strain.csv")
+    fits = phase_fits(d)
+    frames = [int(i) for i in np.linspace(0, len(d) - 1, 24)]
+    c1560 = [window_clearance(d.wavelengths, fits[i], 1560.0) for i in frames]
+    c1565 = [window_clearance(d.wavelengths, fits[i], 1565.0) for i in frames]
+    assert min(c1560) < EDGE_CLEARANCE < min(c1565)
+    d0 = load_sms_csv(root / "data" / "data.csv")
+    f0 = phase_fits(d0)
+    c1545 = [window_clearance(d0.wavelengths, f0[i], 1545.0) for i in np.linspace(0, len(d0) - 1, 24).astype(int)
+             if f0[i] is not None]
+    assert min(c1545) >= EDGE_CLEARANCE
