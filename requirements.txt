@@ -5,3 +5,4 @@ matplotlib>=3.7
 plotly>=5.20
 streamlit>=1.44
 # touched 2026-10-17 to force a full redeploy (cloud process kept the old sms_analysis module)
+# rebuild marker 2026-10-29: Streamlit Cloud kept the old sms_analysis.phase in memory (window_clearance)
