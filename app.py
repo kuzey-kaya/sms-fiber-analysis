@@ -1199,7 +1199,7 @@ def movie_signature(data, track=None, *options) -> str:
     return h.hexdigest()
 
 
-def save_movie_ui(kind: str, data_key: str, render, signature: str, stem: str, fig=None) -> None:
+def save_movie_ui(kind: str, data_key: str, render, signature, stem: str, fig=None) -> None:
     """The "Save this movie" row under a movie.
 
     * a video file — MP4 where ffmpeg is available (small, plays in PowerPoint/Keynote/browsers),
@@ -1210,11 +1210,13 @@ def save_movie_ui(kind: str, data_key: str, render, signature: str, stem: str, f
     took 3 min on the hosted app behind a bare spinner, kept offering the previous file's GIF after
     a file switch, ignored edited masses, and the phase movie's button existed only while the
     animation was built. The made file is now kept per data file with its signature.
+    ``signature`` is a function, called *after* the render: making the phase movie can itself decide
+    the wavelength pair, and a signature taken before would call the fresh file out of date.
     """
     st.markdown("**Save this movie**")
     state_key = f"{kind}_file_{data_key}"
     fmts = video_formats()
-    e = st.columns([1.5, 1, 1.5, 2.2])
+    e = st.columns([2.1, 1, 1.5, 2.2])
     choice = e[0].radio("File type", [VIDEO_LABELS[f] for f in fmts], horizontal=True, key=f"{kind}_fmt",
                         help="MP4: a small video file that plays in PowerPoint, Keynote and browsers. "
                              "GIF: larger, loops on its own, works where video does not."
@@ -1234,7 +1236,7 @@ def save_movie_ui(kind: str, data_key: str, render, signature: str, stem: str, f
                              lambda i, n: bar.progress(min(1.0, i / max(n, 1)), text=f"Frame {i} of {n}"))
                 ext = out.suffix.lstrip(".").lower()
                 st.session_state[state_key] = dict(data=out.read_bytes(), ext=ext, name=f"{stem}.{ext}",
-                                                   signature=(signature, fmt), seconds=_time.time() - t0)
+                                                   signature=signature(), seconds=_time.time() - t0)
         except Exception as exc:                                  # e.g. no spectrum fits the phase model
             st.session_state.pop(state_key, None)
             st.error(f"The movie could not be made: {exc}")
@@ -1247,7 +1249,9 @@ def save_movie_ui(kind: str, data_key: str, render, signature: str, stem: str, f
                                made["name"], VIDEO_MIME[made["ext"]], key=f"{kind}_dl")
     if made:
         note = f"{made['name']} · made in {made['seconds']:.0f} s"
-        if made["signature"] != (signature, fmt):
+        # the file type is not part of it: the radio falls back to MP4 whenever the other movie was on
+        # screen in between, and a GIF made a minute ago is not out of date for that
+        if made["signature"] != signature():
             note += " · **made with other settings** — press *Make the file* again to bring it up to date"
         st.caption(note)
     with e[3]:
@@ -2325,8 +2329,9 @@ with tab_movie:
                                       dpi=80, progress=tick)
 
         save_movie_ui("phase_movie", data_key, render_phase_file,
-                      movie_signature(data, None, la_m, lb_m, every_pf, fps_p, prominence, distance, smooth_window,
-                                      cond_name, cond_unit),
+                      lambda: movie_signature(data, None, st.session_state.get("phase_a", PAPER_LAMBDA_A),
+                                              st.session_state.get("phase_b", PAPER_LAMBDA_B), every_pf, fps_p,
+                                              prominence, distance, smooth_window, cond_name, cond_unit),
                       f"{Path(file_name).stem}_phase_movie", fig_p)
     else:
         st.markdown("The run as a movie: the spectrum frame by frame with its peaks and dips, the "
@@ -2394,9 +2399,9 @@ with tab_movie:
                                 width_fit=fit_m)
 
         save_movie_ui("movie", data_key, render_movie_file,
-                      movie_signature(data, movie_track, movie_label, every_mf, fps_m, prominence, distance,
-                                      smooth_window, cond_name, cond_unit, delta_m, follow_nm_m, trail_m, mark_m,
-                                      smooth_m, fit_m),
+                      lambda: movie_signature(data, movie_track, movie_label, every_mf, fps_m, prominence, distance,
+                                              smooth_window, cond_name, cond_unit, delta_m, follow_nm_m, trail_m,
+                                              mark_m, smooth_m, fit_m),
                       f"{Path(file_name).stem}_movie", fig_m)
 
 # ---- export ---------------------------------------------------------------

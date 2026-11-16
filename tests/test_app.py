@@ -208,6 +208,17 @@ def test_phase_movie_uses_the_same_default_pair_as_the_phase_tab():
         assert not at.exception, [str(e.value) for e in at.exception]
         assert any("readout |φ(1590 nm) − φ(1565 nm)|" in c.value for c in at.caption)
         assert at.session_state["phase_a"] == 1565.0 and at.session_state["phase_b"] == 1590.0
+        # a file made in a fresh session, before anything had decided the pair, is made with the
+        # walked pair and is not called out of date afterwards (the signature is taken after the render)
+        at2 = AppTest.from_file(APP, default_timeout=300).run()
+        at2.radio(key="movie_kind").set_value("Phase readout (SM1E.2)").run()
+        assert "phase_a" not in at2.session_state
+        at2.button(key="phase_movie_make").click().run()
+        assert at2.session_state["phase_a"] == 1565.0
+        at2.toggle(key="movie_build").set_value(True).run()
+        assert not at2.exception, [str(e.value) for e in at2.exception]
+        assert any("strain_phase_movie" in c.value and "made in" in c.value for c in at2.caption)
+        assert not any("made with other settings" in c.value for c in at2.caption)
     finally:
         os.environ.pop("FRINGELAB_EXAMPLE", None)
 
@@ -230,6 +241,14 @@ def test_movies_can_be_saved():
     at.toggle(key="movie_build").set_value(True).run()
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("interactive page (HTML)" in b.label for b in at.get("download_button"))
-    # changing an option marks the file as made with other settings
+    # looking at the other movie and coming back, or choosing the other file type, does not
+    # make a file out of date ...
+    at.radio(key="movie_kind").set_value("Spectra and fringes").run()
+    at.radio(key="movie_kind").set_value("Phase readout (SM1E.2)").run()
+    if len(at.radio(key="phase_movie_fmt").options) > 1:
+        at.radio(key="phase_movie_fmt").set_value(at.radio(key="phase_movie_fmt").options[1]).run()
+    assert any("phase_movie" in c.value and "made in" in c.value for c in at.caption)
+    assert not any("made with other settings" in c.value for c in at.caption)
+    # ... changing an option does
     at.slider(key="pm_fps").set_value(20).run()
     assert any("made with other settings" in c.value for c in at.caption)

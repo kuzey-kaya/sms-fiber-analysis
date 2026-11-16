@@ -204,6 +204,11 @@ It is a continuous cooldown — no setpoint steps.
   animation (10.8 MB for the strain run, 1.6 s, made on click where `st.download_button` takes a
   callable: `DEFERRED_DOWNLOAD`). `movie_gif`/`phase_movie_gif` are gone. Tests `tests/test_movie.py`,
   `test_app.py::test_movies_can_be_saved`.
+  Live check the same day (strain upload): MP4 in 8 s (was 189 s), GIF 7 s, phase MP4 13 s incl. the
+  fits. Found there: the phase file was flagged "made with other settings" once the animation was
+  built, because the signature was taken before the render decided the pair (1545/1570 → 1565/1590)
+  → `save_movie_ui` takes `signature` as a function and calls it after the render. The file type is not in the
+  signature either: the `<kind>_fmt` radio falls back to MP4 whenever the other movie was on screen.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,
