@@ -83,7 +83,7 @@ loaded file was interpreted.
 | Phase | the SM1E.2 phase-unwrapping readout, computed when *Compute the phase readout* is turned on: numbered extrema and the cubic Δφ(λ), the phase difference between two chosen wavelengths vs time and vs the condition, λc vs the condition, the best wavelength pairs for the run, and how much of the phase change is common to all wavelengths |
 | 3-D view | transmittance as height over wavelength × time/condition (rotatable) |
 | Movie | two movies, chosen at the top of the tab and built when *Build the animation* is turned on (a few seconds). *Spectra and fringes*: the run frame by frame (spectrum + extrema with fading trails, big temperature readout, map cursor, one fringe or all fringes in the lower-right panel) with Δ view and a camera that follows a fringe. *Phase readout (SM1E.2)*: numbered extrema, the cubic Δφ(λ) and λc moving, the readout growing (pair taken from the Phase tab). Both with play/pause, a time slider and GIF export for slides |
-| Export | tracked fringes (wide/long CSV), fringe table, the settings used |
+| Export | tracked fringes (wide/long CSV), fringe table, the settings used, load steps, Igor Text files |
 
 Sidebar settings: data source (the example cooldown `data/data.csv` or an uploaded
 file) and the **Load-step run** checkbox, condition name/unit and column overrides (for runs where strain, load, …
@@ -157,10 +157,16 @@ by point number with X, Y and dX, dY, the way a step height is read off an Igor 
 (also on the one-fringe Igor view of the Fringe tracking tab). The track downloads as
 CSV or as an **Igor Text file** (`.itx`) whose waves carry the advisor's own names —
 `peakmin1576a`, `timemin1576a`, `tempmin1576a`, `shift1576a`, `mass` — so `display
-peakmin1576a vs timemin1576a` works in Igor as is; the Export tab adds the tracked
+peakmin1576a vs timemin1576a` is meant to work in Igor as is; the Export tab adds the tracked
 fringes (`peakmin1552`-style waves + `tim`, `temp`, `mass`) and the spectra themselves
 (`wave0`, `n0`, `n1`, … + `tim`, `temp`, the inputs of his `trackpeaknew`) as `.itx`
 (`sms_analysis/igor_export.py`; Igor: *File → Load Waves → Load Igor Text*).
+The files follow WaveMetrics' Igor Text format, but none has been loaded in a real
+Igor yet (there is no Igor on the development machine) — treat them as untested
+until someone has. In the CSV downloads the condition column is named after the
+condition (`temperature`, or `mass` on a load run, next to the file's own
+`temperature`); on a load run it is empty on the frames where a load is being put on
+or taken off, the frames the fits skip.
 Script: `python scripts/igor_findpeak.py data/strain.csv` (no range given: the app's
 automatic fringe and box, and on a load-step run the mass per plateau, 50 g steps
 assumed), `--fringe dip@1574.0`, or the advisor's call `--points 735 766 --min`.

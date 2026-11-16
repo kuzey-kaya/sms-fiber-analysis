@@ -32,6 +32,7 @@ from plotly.subplots import make_subplots
 from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_sms_csv,
                           track_all_extrema)
 from sms_analysis.igor_export import findpeak_itx, spectra_itx, track_names, tracks_itx
+from sms_analysis.export import condition_column, frame_csv, long_table, wide_table
 from sms_analysis.findpeak import points_to_nm, track_findpeak
 from sms_analysis.peaks import smooth
 from sms_analysis.tracking import flicker_fraction, refine_width_fit
@@ -207,7 +208,7 @@ def format_guide(example: SpectraSet | None, key: str) -> None:
     st.caption("First rows of a file in the base layout:")
     st.dataframe(pd.read_csv(io.StringIO(csv)), hide_index=True, width="stretch")
     st.download_button("Download this template (CSV)", csv, "fringelab_template.csv", "text/csv",
-                       key=f"tpl_{key}")
+                       key=f"tpl_{key}", **NO_RERUN)
 
 
 def stat_strip(items: list[tuple[str, str, str]]) -> None:
@@ -1184,6 +1185,11 @@ VIDEO_MIME = {"mp4": "video/mp4", "gif": "image/gif"}
 # st.download_button takes a callable from some Streamlit version on: the file is then made only
 # when the button is pressed (an older install builds it on every rerun instead)
 DEFERRED_DOWNLOAD = "callable" in (st.download_button.__doc__ or "")
+# A download button reruns the whole script by default. While that rerun is on its way to the tab
+# the button lives in, Streamlit has already dropped the session's files, so a second download
+# pressed within those seconds came back as a 14-byte "File not found" (2026-11-16, live site,
+# strain run: wide CSV ok, Settings 1.7 s later not). A download changes nothing — no rerun.
+NO_RERUN = {"on_click": "ignore"}
 
 
 def movie_signature(data, track=None, *options) -> str:
@@ -1246,7 +1252,7 @@ def save_movie_ui(kind: str, data_key: str, render, signature, stem: str, fig=No
         st.write("")
         if made:
             st.download_button(f"Download {made['ext'].upper()} · {len(made['data']) / 1e6:.1f} MB", made["data"],
-                               made["name"], VIDEO_MIME[made["ext"]], key=f"{kind}_dl")
+                               made["name"], VIDEO_MIME[made["ext"]], key=f"{kind}_dl", **NO_RERUN)
     if made:
         note = f"{made['name']} · made in {made['seconds']:.0f} s"
         # the file type is not part of it: the radio falls back to MP4 whenever the other movie was on
@@ -1261,7 +1267,7 @@ def save_movie_ui(kind: str, data_key: str, render, signature, stem: str, fig=No
                 return fig.to_html(full_html=True, include_plotlyjs=True, auto_play=False,
                                    config={"displaylogo": False}).encode("utf-8")
             st.download_button("Download interactive page (HTML)", as_html if DEFERRED_DOWNLOAD else as_html(),
-                               f"{stem}.html", "text/html", key=f"{kind}_html",
+                               f"{stem}.html", "text/html", key=f"{kind}_html", **NO_RERUN,
                                help="The animation above as one file: opens in any browser, offline, with "
                                     "Play, the time slider, zoom and hover. Made the moment you press.")
         else:
@@ -1980,8 +1986,9 @@ with tab_igor:
                 pass
         st.caption(line + ".")
     dl = st.columns([1, 1, 2])
-    dl[0].download_button("FindPeak track (CSV)", fp.to_csv(index=False), f"{Path(file_name).stem}_findpeak.csv",
-                          "text/csv", key=f"{fk}_dl")
+    dl[0].download_button("FindPeak track (CSV)", frame_csv(fp, condition_column(cond_name, has_cond), step_cond),
+                          f"{Path(file_name).stem}_findpeak.csv",
+                          "text/csv", key=f"{fk}_dl", **NO_RERUN)
     # the same track as Igor waves, named the way the advisor's trackpeaknew names them
     fp_kind = "dip" if neg else "peak"
     fp_start = float(np.nanmean(w_fp[:5])) if np.isfinite(w_fp[:5]).any() else float(a_fp)
@@ -1997,7 +2004,7 @@ with tab_igor:
                           mass=step_cond if step_cond is not None else None,
                           call=f"FindPeak /R=({a_fp:.1f},{b_fp:.1f}) /B={box_fp}{' /N' if neg else ''} on {file_name}")
     dl[1].download_button("Igor waves (.itx)", itx_fp, f"{Path(file_name).stem}_{fp_names['wavelength']}.itx",
-                          "text/plain", key=f"{fk}_itx",
+                          "text/plain", key=f"{fk}_itx", **NO_RERUN,
                           help="Igor Text file: File → Load Waves → Load Igor Text. Waves "
                                f"{fp_names['wavelength']}, {fp_names['time']}, {fp_names['temperature']}, "
                                f"{fp_names['shift']}" + (", mass" if step_cond is not None else "")
@@ -2263,8 +2270,8 @@ with tab_phase:
                         "The average is common to all wavelengths and cancels in a phase difference; only the "
                         "spread reaches this readout. A strain run, where the phase profile changes shape, is "
                         "where the paper demonstrates the method.")
-        st.download_button("Phase readout per spectrum (CSV)", ser.to_csv(index=False),
-                           f"{Path(file_name).stem}_phase_series.csv", "text/csv")
+        st.download_button("Phase readout per spectrum (CSV)", frame_csv(ser, condition_column(cond_name, has_cond)),
+                           f"{Path(file_name).stem}_phase_series.csv", "text/csv", **NO_RERUN)
 
 # ---- 3-D ------------------------------------------------------------------
 with tab_3d:
@@ -2408,11 +2415,15 @@ with tab_movie:
 with tab_export:
     st.write("Download the results for the current file and settings. "
              "Any figure can be saved as PNG with the camera icon that appears above it.")
-    wide = pd.DataFrame({"time": data.time, "condition": data.temperature})
-    for k, tr in tracks.items():
-        wide[k] = tr["wavelength"].to_numpy()
-    long = pd.concat([tr.assign(fringe=k) for k, tr in tracks.items()], ignore_index=True) \
-        if tracks else pd.DataFrame()
+    # The condition column is called what it is ("temperature", "mass", ...) in both files, and on
+    # a load run both carry the step values with the settle rows blank — the values the fits and
+    # the Igor file's `mass` wave use — next to the file's own temperature.
+    cond_col = condition_column(cond_name, has_cond)
+    if cond_source == "steps":
+        wide = wide_table(tracks, data.time, step_cond, cond_col, temperature=file_cond)
+    else:
+        wide = wide_table(tracks, data.time, data.temperature, cond_col)
+    long = long_table(tracks, cond_col)
     settings = dict(file=file_name, layout=data.layout, condition=cond_name, unit=cond_unit,
                     wavelength_range_nm=list(wl_range), prominence=prominence, distance=distance,
                     smooth_window=smooth_window, search_window_nm=search_window,
@@ -2424,16 +2435,22 @@ with tab_export:
         steps_out = plateaus.assign(value=step_values, loaded=classify_plateaus(plateaus))
         settings["steps"] = (steps_out[["plateau", "t_start", "t_end", "n", "mean", "shift", "loaded", "value"]]
                              .round(4).to_dict(orient="records"))
-        st.download_button("Load steps (CSV)", steps_out.to_csv(index=False), f"{stem}_steps.csv", "text/csv")
+        st.download_button("Load steps (CSV)", steps_out.to_csv(index=False), f"{stem}_steps.csv", "text/csv",
+                           **NO_RERUN)
     c = st.columns(4)
     c[0].download_button("Tracked fringes (wide CSV)", wide.to_csv(index=False),
-                         f"{stem}_tracked_wide.csv", "text/csv")
+                         f"{stem}_tracked_wide.csv", "text/csv", **NO_RERUN)
     c[1].download_button("Tracked fringes (long CSV)", long.to_csv(index=False),
-                         f"{stem}_tracked_long.csv", "text/csv")
+                         f"{stem}_tracked_long.csv", "text/csv", **NO_RERUN)
     c[2].download_button("Fringe / sensitivity table", table.to_csv(index=False),
-                         f"{stem}_fringes.csv", "text/csv")
+                         f"{stem}_fringes.csv", "text/csv", **NO_RERUN)
     c[3].download_button("Settings (JSON)", json.dumps(settings, indent=2),
-                         f"{stem}_settings.json", "application/json")
+                         f"{stem}_settings.json", "application/json", **NO_RERUN)
+    st.caption(f"In both CSV files the column `{cond_col}` is the {cond_name.lower()}"
+               + (f" in {cond_unit}" if cond_unit else "")
+               + ("; it is empty on the frames where a load is being put on or taken off"
+                  if cond_source == "steps" else "")
+               + ". An empty fringe cell = the lock was lost on that frame.")
     st.markdown("**For Igor Pro** — Igor Text files (`File → Load Waves → Load Igor Text`), named the way "
                 "the advisor's experiment names them: `wave0` + `n0`, `n1`, … for the spectra with `tim` "
                 "and `temp`, and `peakmin1552`-style waves for the tracked fringes (plus `mass` on a load run).")
@@ -2442,7 +2459,7 @@ with tab_export:
                           tracks_itx(tracks, data.time, file_cond if file_cond is not None else data.temperature,
                                      "temperature" if file_cond is not None or cond_source != "steps" else cond_name,
                                      mass=step_cond if cond_source == "steps" else None, source=file_name),
-                          f"{stem}_tracks.itx", "text/plain", key="itx_tracks")
+                          f"{stem}_tracks.itx", "text/plain", key="itx_tracks", **NO_RERUN)
     every_itx = int(ci[1].number_input("spectra: every N-th", 1, max(1, len(data)), 1, key="itx_every",
                                        help="1 = all spectra (one wave each); larger N keeps the file small."))
     rows_itx = list(range(0, len(data), every_itx))
@@ -2451,7 +2468,7 @@ with tab_export:
     ci[1].download_button(f"Spectra (.itx, {len(rows_itx)} waves)",
                           spectra_itx(data.wavelengths, data.spectra, data.time,
                                       file_cond if file_cond is not None else data.temperature, rows_itx, file_name),
-                          f"{stem}_spectra.itx", "text/plain", key="itx_spectra")
+                          f"{stem}_spectra.itx", "text/plain", key="itx_spectra", **NO_RERUN)
     ci[2].caption("In Igor: `display n0, n" + str(rows_itx[-1]) + " vs wave0` overlays the first and last spectrum, "
                   "and `trackpeaknew(\"n\", 1, 1, N, wave0, \"min1489\", temp, tim, p1, p2, -1)` runs the advisor's "
                   "own tracker on exactly the spectra FringeLab analysed (same crop, same frames).")

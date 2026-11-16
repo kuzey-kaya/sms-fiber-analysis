@@ -181,7 +181,8 @@ GitHub's free monthly allowance is limited.
   Igor Text*. The waves are named the way the group's experiment names them
   (`peakmin1576a`, `timemin1576a`, `tempmin1576a`, `shift1576a`, `mass`; `wave0`,
   `n0`, `n1`, …, `tim`, `temp`), so the usual `display … vs …` commands and
-  `trackpeaknew(...)` run on them unchanged.
+  `trackpeaknew(...)` should run on them unchanged. *Not yet tried in a real Igor* —
+  the files follow the documented Igor Text format, but nobody has loaded one.
 - **Phase readout, and how to check the local fit:** on the Phase tab turn on
   *Compute the phase readout*. The box *How much better is the local fit?* shows
   the readout computed two ways on the same frames — the cubic through the

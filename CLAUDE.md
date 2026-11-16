@@ -209,6 +209,23 @@ It is a continuous cooldown — no setpoint steps.
   built, because the signature was taken before the render decided the pair (1545/1570 → 1565/1590)
   → `save_movie_ui` takes `signature` as a function and calls it after the render. The file type is not in the
   signature either: the `<kind>_fmt` radio falls back to MP4 whenever the other movie was on screen.
+  Export tab, both files on the live site, the same day (owner: "check the Export tab with both
+  datasets"; downloads read in the page via a hook on `HTMLAnchorElement.prototype.click`, nothing
+  saved). Contents were right (cooldown: wide 730 x 26, long 17 520 rows, table 24 rows, .itx 26 waves,
+  spectra .itx 731 waves / 6.4 MB; strain: 914 x 22, 18 280 rows, 20 rows, 17 load steps, 23 waves
+  incl. `mass`, 915 waves / 8.1 MB). Three defects fixed: (1) every `st.download_button` reran the
+  whole script, and while that rerun is on its way to the button's tab Streamlit has already dropped
+  the session's media files — a second download pressed 2-8 s after the first came back as a 14-byte
+  "File not found" (strain run; reproducible) → all 13 buttons take `**NO_RERUN`
+  (`on_click="ignore"`, Streamlit >= 1.43); (2) on a load run the long CSV, the FindPeak CSV and the
+  Phase CSV said `temperature` over a column of grams, the wide CSV said `condition`, and wide (filled)
+  disagreed with long/.itx (settle rows blank) → `sms_analysis/export.py`: `condition_column`
+  ("Mass" → `mass`), `wide_table` (time, the file's temperature on a load run, the condition, fringes),
+  `long_table`, `frame_csv`; every file takes the step values with blank settle rows; a caption under
+  the buttons says what the column is; (3) `igor_text` now ends with a blank line, as the WaveMetrics
+  Igor Text format asks. Still true: no `.itx` has ever been loaded in a real Igor (none on this
+  machine) — the advisor has to try one. Tests `tests/test_export.py`,
+  `test_app.py::test_downloads_do_not_rerun_the_page`.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,

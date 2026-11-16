@@ -183,6 +183,11 @@ def _check_strain_file(at):
     names = [b.label for b in at.get("download_button")]
     assert "Igor waves (.itx)" in names and "Tracked fringes (.itx)" in names
     assert any(n.startswith("Spectra (.itx") for n in names)
+    # 2026-11-16: the CSV files call the step condition what it is, and no download reruns the page
+    note = [c.value for c in at.caption if c.value.startswith("In both CSV files")]
+    assert note and "`mass`" in note[0] and "put on or taken off" in note[0]
+    assert "Load steps (CSV)" in names
+    assert all(b.proto.ignore_rerun for b in at.get("download_button"))
     at.radio(key="detail_mode").set_value("One fringe (Igor style)").run()
     assert not at.exception
     at.radio(key="movie_kind").set_value("Spectra and fringes").run()
@@ -252,3 +257,13 @@ def test_movies_can_be_saved():
     # ... changing an option does
     at.slider(key="pm_fps").set_value(20).run()
     assert any("made with other settings" in c.value for c in at.caption)
+
+
+def test_downloads_do_not_rerun_the_page(app):
+    """2026-11-16, live site: a download button reran the whole script, and a second download pressed
+    while that rerun was under way came back as "File not found". Every download is on_click="ignore"."""
+    buttons = app.get("download_button")
+    assert len(buttons) >= 8
+    assert all(b.proto.ignore_rerun for b in buttons), [b.label for b in buttons if not b.proto.ignore_rerun]
+    note = [c.value for c in app.caption if c.value.startswith("In both CSV files")]
+    assert note and "`temperature`" in note[0] and "put on or taken off" not in note[0]

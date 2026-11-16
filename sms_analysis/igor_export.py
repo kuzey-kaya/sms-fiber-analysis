@@ -85,7 +85,8 @@ def igor_text(waves: dict[str, Iterable], notes: dict[str, str] | None = None,
     for name, text in (notes or {}).items():
         safe = str(text).replace('"', "'").replace("\r", " ").replace("\n", " ")
         lines.append(f'X Note {wave_name(name)}, "{safe}"')
-    return "\n".join(lines) + "\n"
+    # Igor Text: "the file must end with a blank line" (WaveMetrics, Igor Text File Format)
+    return "\n".join(lines) + "\n\n"
 
 
 def spectra_itx(wavelengths: np.ndarray, spectra: np.ndarray, time=None, temperature=None,
