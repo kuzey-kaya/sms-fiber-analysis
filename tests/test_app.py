@@ -210,3 +210,26 @@ def test_phase_movie_uses_the_same_default_pair_as_the_phase_tab():
         assert at.session_state["phase_a"] == 1565.0 and at.session_state["phase_b"] == 1590.0
     finally:
         os.environ.pop("FRINGELAB_EXAMPLE", None)
+
+
+def test_movies_can_be_saved():
+    """2026-11-16: "Save this movie" makes a video file for both movies without the animation being
+    built, keeps it per data file, and offers the interactive HTML page once the animation is on."""
+    at = AppTest.from_file(APP, default_timeout=600).run()
+    for kind, key in (("Spectra and fringes", "movie"), ("Phase readout (SM1E.2)", "phase_movie")):
+        at.radio(key="movie_kind").set_value(kind).run()
+        assert not at.toggle(key="movie_build").value
+        at.button(key=f"{key}_make").click().run()
+        assert not at.exception, [str(e.value) for e in at.exception]
+        made = at.session_state[[k for k in at.session_state if str(k).startswith(f"{key}_file_")][0]]
+        assert made["ext"] in ("mp4", "gif") and len(made["data"]) > 5000
+        assert made["data"][:6] == b"GIF89a" or made["data"][4:8] == b"ftyp"
+        labels = [b.label for b in at.get("download_button")]
+        assert any(lab.startswith(f"Download {made['ext'].upper()}") for lab in labels)
+        assert not any("HTML" in lab for lab in labels)                 # needs the built animation
+    at.toggle(key="movie_build").set_value(True).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("interactive page (HTML)" in b.label for b in at.get("download_button"))
+    # changing an option marks the file as made with other settings
+    at.slider(key="pm_fps").set_value(20).run()
+    assert any("made with other settings" in c.value for c in at.caption)

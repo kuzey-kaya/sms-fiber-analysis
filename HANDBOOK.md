@@ -194,6 +194,11 @@ GitHub's free monthly allowance is limited.
   top is flat) is flagged under the tiles and hidden in the shift plot; untick
   *Hide flickering fringes* to see it. For noisy spectra the movie draws the
   smoothed curve and width-fits the markers (*Movie options*).
+- **Saving a movie:** on the Movie tab, *Save this movie* → *Make the file* gives an
+  MP4 (or a GIF) of the run you have loaded, your own upload included, in a few
+  seconds with a progress bar; *Download interactive page (HTML)* (shown once
+  *Build the animation* is on) saves the animation itself as one file that opens
+  in any browser without internet. The Phase-readout movie has the same row.
   An uploaded file is processed by the computer that runs the app; with 4b or 4c
   that is a cloud server.
 - **As the default example:** replace `data/data.csv` with your file.

@@ -186,6 +186,24 @@ It is a continuous cooldown — no setpoint steps.
   start at 1565/1590 on the strain run. The pair walk is now `default_phase_pair(data, fits, key)`
   (module level, stores `phase_pair_<key>` + the widget keys) and the phase movie calls it when the
   key is missing. Test `test_phase_movie_uses_the_same_default_pair_as_the_phase_tab`.
+  2026-11-16 (owner: "when we make a movie with our own data we cannot export it?", then "an
+  alternative to GIF is fine as long as it is fast and works well"). The export existed ("Render as
+  GIF for slides") and worked on an uploaded strain file on the live site, but took 189 s behind a
+  bare spinner (61–101 s locally, +364 MB RSS), touching any widget meanwhile cancelled it, the phase
+  movie's button existed only while the animation was built, a GIF stayed on offer after a file
+  switch, and the cache ignored the track/masses. Now: `movie._write_frames` draws the static figure
+  once and blits only the changing artists on an Agg canvas (`_new_figure`, no pyplot; the follow
+  camera, which moves the axis, still redraws fully), the map is `imshow` instead of `pcolormesh`
+  (0.17 s per frame alone), GIF frames are palettised as made, MP4 frames are piped to ffmpeg
+  (`ffmpeg_path`: PATH or the `imageio-ffmpeg` binary, now in requirements.txt; libx264/yuv420p) —
+  strain 132 frames: MP4 5 s / 0.4 MB / +45 MB, GIF 9 s / 2.0 MB / +148 MB; `video_formats()`.
+  App: `save_movie_ui(kind, data_key, render, signature, stem, fig)` under both movies — radio
+  `<kind>_fmt` (MP4 video / Animated GIF), button `<kind>_make` with `st.progress`, result in
+  `<kind>_file_<data_key>` (per file; `movie_signature` marks it "made with other settings"),
+  download `<kind>_dl`, and `<kind>_html` = `fig.to_html(include_plotlyjs=True)` of the on-screen
+  animation (10.8 MB for the strain run, 1.6 s, made on click where `st.download_button` takes a
+  callable: `DEFERRED_DOWNLOAD`). `movie_gif`/`phase_movie_gif` are gone. Tests `tests/test_movie.py`,
+  `test_app.py::test_movies_can_be_saved`.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,

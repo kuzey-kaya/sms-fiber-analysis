@@ -2,26 +2,132 @@
 map with a time cursor, and one tracked fringe drawn as time advances.
 
 This is the Python counterpart of Igor Pro's movie export (stepping a graph
-through the rows of a wave and saving each frame).  MP4 needs ffmpeg on the
-PATH; without it a GIF is written with Pillow.
+through the rows of a wave and saving each frame).  MP4 needs ffmpeg — on the
+PATH, or the binary shipped by the ``imageio-ffmpeg`` package; without either
+a GIF is written with Pillow.
+
+Speed (2026-11-16, the owner: exporting a movie of an uploaded run took 3 min
+on the hosted app and looked broken): the frames are no longer produced by
+``FuncAnimation.save`` (a full ``savefig`` per frame, 0.57 s each). The static
+part of the figure — axes, ticks, legend, the spectral map — is drawn once and
+kept as a background; every frame restores it and draws only the artists that
+change (``_write_frames``, matplotlib blitting on an Agg canvas). The map is an
+``imshow`` image instead of a ``pcolormesh`` (0.17 s per frame on its own). GIF
+frames are palettised as they are made (a quarter of the memory); MP4 frames
+are piped straight into ffmpeg.
 """
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import matplotlib
-import matplotlib.animation as animation
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 import pandas as pd
+from PIL import Image
 
 from .igor_style import IGOR_BLUE, IGOR_RED
 from .io import SpectraSet
 from .peaks import detect_extrema, smooth
 from .tracking import refine_width_fit
 from .plotting import COLOR_TEMPERATURE, COLOR_WAVELENGTH
+
+
+def ffmpeg_path() -> str | None:
+    """The ffmpeg executable to pipe frames into: the one on the PATH (or matplotlib's
+    ``animation.ffmpeg_path``), else the binary bundled with ``imageio-ffmpeg``; None if neither."""
+    exe = shutil.which(str(matplotlib.rcParams.get("animation.ffmpeg_path", "ffmpeg")))
+    if exe:
+        return exe
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
+def video_formats() -> list[str]:
+    """What this machine can write, best first: ``["mp4", "gif"]`` with ffmpeg, else ``["gif"]``."""
+    return ["mp4", "gif"] if ffmpeg_path() else ["gif"]
+
+
+def _new_figure(figsize):
+    """A figure on its own Agg canvas — no pyplot, no GUI backend, nothing to close."""
+    fig = Figure(figsize=figsize)
+    FigureCanvasAgg(fig)
+    return fig
+
+
+def _write_frames(fig, draw, n_frames: int, out: Path, fps: int, dpi: int, animated=()) -> Path:
+    """Call ``draw(k)`` for every frame and write the canvas to ``out`` (.mp4 with ffmpeg, else .gif).
+
+    ``animated``: the artists ``draw`` changes, in drawing order. When given, the rest of the
+    figure is rendered once and re-used as the background of every frame (blitting); when empty
+    (something static changes too, e.g. the axis limits of the follow camera) every frame is
+    drawn in full.
+    """
+    out = Path(out)
+    ffmpeg = ffmpeg_path() if out.suffix.lower() == ".mp4" else None
+    if ffmpeg is None and out.suffix.lower() != ".gif":
+        out = out.with_suffix(".gif")
+    fig.set_dpi(dpi)
+    canvas = fig.canvas
+    width, height = canvas.get_width_height()
+    blit = bool(animated)
+    background = None
+    if blit:
+        for a in animated:
+            a.set_animated(True)
+        canvas.draw()
+        background = canvas.copy_from_bbox(fig.bbox)
+
+    proc = None
+    frames: list[Image.Image] = []
+    if ffmpeg:
+        # raw RGBA in, H.264 / yuv420p out (the pixel format PowerPoint, Keynote and browsers play);
+        # the pad filter makes odd canvas sizes even, which yuv420p requires
+        proc = subprocess.Popen(
+            [ffmpeg, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
+             "-s", f"{width}x{height}", "-r", str(fps), "-i", "-", "-an",
+             "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-vcodec", "libx264", "-pix_fmt", "yuv420p",
+             "-crf", "20", "-movflags", "+faststart", str(out)],
+            stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        for k in range(n_frames):
+            draw(k)
+            if blit:
+                canvas.restore_region(background)
+                for a in animated:
+                    (a.axes if a.axes is not None else fig).draw_artist(a)
+            else:
+                canvas.draw()
+            buf = canvas.buffer_rgba()
+            if proc is not None:
+                proc.stdin.write(buf)
+            else:
+                im = Image.frombuffer("RGBA", (width, height), bytes(buf), "raw", "RGBA", 0, 1)
+                frames.append(im.convert("RGB").quantize(colors=128, method=Image.Quantize.FASTOCTREE,
+                                                         dither=Image.Dither.NONE))
+    except BrokenPipeError:
+        pass                                    # ffmpeg stopped early: its message is raised below
+    finally:
+        if proc is not None:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+    if proc is not None:
+        err = proc.stderr.read().decode("utf-8", "replace")
+        if proc.wait() != 0:
+            raise RuntimeError(f"ffmpeg failed: {err.strip()[-400:]}")
+    else:
+        frames[0].save(out, save_all=True, append_images=frames[1:], duration=int(round(1000 / fps)), loop=0)
+    return out
 
 
 def frame_rows(n_rows: int, every: int = 5, max_frames: int | None = None) -> np.ndarray:
@@ -57,6 +163,8 @@ def render_movie(
 ) -> Path:
     """Write the animation to ``out`` (.mp4 with ffmpeg, otherwise .gif).
 
+    ``every`` is the frame step; the last spectrum is always included.
+
     ``smooth_display`` draws the Savitzky–Golay-smoothed spectra (detection is
     unchanged); ``width_fit`` positions the drawn extrema with the fringe-width
     fit (:func:`~sms_analysis.tracking.refine_width_fit`) — both for noisy runs.
@@ -75,7 +183,7 @@ def render_movie(
     t_min = data.time / 60.0
     has_cond = data.has_temperature
 
-    fig = plt.figure(figsize=(11, 6.4))
+    fig = _new_figure((11, 6.4))
     gs = fig.add_gridspec(2, 2, width_ratios=[1.35, 1], height_ratios=[1, 1], wspace=0.28, hspace=0.42,
                           top=0.90, bottom=0.09, left=0.07, right=0.93)
     ax_spec = fig.add_subplot(gs[:, 0])
@@ -132,8 +240,11 @@ def render_movie(
     # --- map panel with a time cursor --------------------------------------
     sr = max(1, len(data) // 400)
     sc = max(1, len(wl) // 600)
-    ax_map.pcolormesh(wl[::sc], t_min[::sr], data.spectra[::sr, ::sc], cmap="viridis",
-                      shading="auto", rasterized=True)
+    # an image, not a pcolormesh: the mesh alone cost 0.17 s per frame (the run is sampled evenly
+    # enough in time for the two to look the same)
+    ax_map.imshow(data.spectra[::sr, ::sc], cmap="viridis", aspect="auto", origin="lower",
+                  interpolation="nearest",
+                  extent=(float(wl.min()), float(wl.max()), float(t_min[0]), float(t_min[-1])))
     cursor = ax_map.axhline(t_min[0], color="white", lw=1.6)
     ax_map.set_xlabel("Wavelength (nm)")
     ax_map.set_ylabel("Time (min)")
@@ -203,16 +314,11 @@ def render_movie(
             progress(k + 1, len(rows))
         return line, peaks, dips, stamp, cursor
 
-    anim = animation.FuncAnimation(fig, draw, frames=len(rows), interval=1000 / fps, blit=False)
-    if out.suffix.lower() == ".mp4" and animation.FFMpegWriter.isAvailable():
-        writer = animation.FFMpegWriter(fps=fps, bitrate=2400)
-    else:
-        if out.suffix.lower() != ".gif":
-            out = out.with_suffix(".gif")
-        writer = animation.PillowWriter(fps=fps)
-    anim.save(out, writer=writer, dpi=dpi)
-    plt.close(fig)
-    return out
+    # everything draw() touches, in drawing order; the follow camera moves the x axis itself, so
+    # that mode redraws the whole figure
+    moving = [line, trail_sc, peaks, dips, marker, readout, cursor, trk_line, cond_line, stamp]
+    animated = [] if follow_nm else [a for a in moving if a is not None]
+    return _write_frames(fig, draw, len(rows), out, fps, dpi, animated)
 
 
 def render_phase_movie(
@@ -255,7 +361,7 @@ def render_phase_movie(
     has_cond = data.has_temperature
     fit0 = fits[rows[0]]
 
-    fig = plt.figure(figsize=(11, 6.4))
+    fig = _new_figure((11, 6.4))
     gs = fig.add_gridspec(2, 2, width_ratios=[1.35, 1], wspace=0.3, hspace=0.45,
                           top=0.90, bottom=0.09, left=0.07, right=0.93)
     ax_s = fig.add_subplot(gs[:, 0])
@@ -342,13 +448,5 @@ def render_phase_movie(
             progress(k + 1, len(rows))
         return line, ext_pts, curve, pts, lc_line, rd, stamp
 
-    anim = animation.FuncAnimation(fig, draw, frames=len(rows), interval=1000 / fps, blit=False)
-    if out.suffix.lower() == ".mp4" and animation.FFMpegWriter.isAvailable():
-        writer = animation.FFMpegWriter(fps=fps, bitrate=2400)
-    else:
-        if out.suffix.lower() != ".gif":
-            out = out.with_suffix(".gif")
-        writer = animation.PillowWriter(fps=fps)
-    anim.save(out, writer=writer, dpi=dpi)
-    plt.close(fig)
-    return out
+    moving = [line, ext_pts, *labels_txt, curve, pts, lc_line, rd, cond_line, stamp]
+    return _write_frames(fig, draw, len(rows), out, fps, dpi, [a for a in moving if a is not None])

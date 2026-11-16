@@ -36,7 +36,7 @@ from sms_analysis.findpeak import points_to_nm, track_findpeak
 from sms_analysis.peaks import smooth
 from sms_analysis.tracking import flicker_fraction, refine_width_fit
 from sms_analysis.io import SpectraSet
-from sms_analysis.movie import frame_rows, render_movie, render_phase_movie
+from sms_analysis.movie import frame_rows, render_movie, render_phase_movie, video_formats
 from sms_analysis.phase import (EDGE_CLEARANCE, PAPER_LAMBDA_A, PAPER_LAMBDA_B, local_fit, phase_fits, phase_sensitivity,
                                 window_clearance,
                                 phase_series, scan_pairs, tracked_phase_change)
@@ -1179,27 +1179,89 @@ def phase_movie_figure(data, rows, fits, la, lb, fps, cond_name, cond_unit):
     return fig
 
 
-@st.cache_data(show_spinner=False)
-def phase_movie_gif(_data: SpectraSet, _fits, data_key: str, la: float, lb: float, every: int, fps: int,
-                    cond_name: str, cond_unit: str) -> bytes:
-    with tempfile.TemporaryDirectory() as tmp:
-        out = render_phase_movie(_data, Path(tmp) / "phase.gif", fits=_fits, lambda_a=la, lambda_b=lb,
-                                 every=every, fps=fps, cond_name=cond_name, cond_unit=cond_unit, dpi=80)
-        return out.read_bytes()
+VIDEO_LABELS = {"mp4": "MP4 video", "gif": "Animated GIF"}
+VIDEO_MIME = {"mp4": "video/mp4", "gif": "image/gif"}
+# st.download_button takes a callable from some Streamlit version on: the file is then made only
+# when the button is pressed (an older install builds it on every rerun instead)
+DEFERRED_DOWNLOAD = "callable" in (st.download_button.__doc__ or "")
 
 
-@st.cache_data(show_spinner=False)
-def movie_gif(_data: SpectraSet, _track, data_key: str, track_label: str, every: int, fps: int,
-              prominence: float, distance: int, smooth_window: int, cond_name: str, cond_unit: str,
-              delta: bool = False, follow_nm: float | None = None, trail: int = 8, mark_fringe: bool = True,
-              smooth_display: bool = False, width_fit: bool = False) -> bytes:
-    with tempfile.TemporaryDirectory() as tmp:
-        out = render_movie(_data, Path(tmp) / "movie.gif", track=_track, track_label=track_label,
-                           every=every, fps=fps, prominence=prominence, distance=distance,
-                           smooth_window=smooth_window, cond_name=cond_name, cond_unit=cond_unit, dpi=80,
-                           delta=delta, follow_nm=follow_nm, trail=trail, mark_fringe=mark_fringe,
-                           smooth_display=smooth_display, width_fit=width_fit)
-        return out.read_bytes()
+def movie_signature(data, track=None, *options) -> str:
+    """Fingerprint of everything a rendered movie depends on: the condition values (the masses of
+    a load run can be edited), the drawn track and the options — so a file made earlier is
+    recognised as out of date instead of being offered as if it were current."""
+    import hashlib
+    h = hashlib.blake2b(digest_size=8)
+    h.update(np.nan_to_num(np.asarray(data.temperature, float)).tobytes())
+    if track is not None:
+        h.update(np.nan_to_num(track["wavelength"].to_numpy(float)).tobytes())
+    h.update(repr(options).encode())
+    return h.hexdigest()
+
+
+def save_movie_ui(kind: str, data_key: str, render, signature: str, stem: str, fig=None) -> None:
+    """The "Save this movie" row under a movie.
+
+    * a video file — MP4 where ffmpeg is available (small, plays in PowerPoint/Keynote/browsers),
+      GIF otherwise or by choice — rendered by ``render(out_path, progress)`` with a progress bar;
+    * the on-screen animation itself as one interactive HTML page (``fig``), when it is built.
+
+    2026-11-16 (owner: "can we not export the movie of our own data?"): the old "Render as GIF"
+    took 3 min on the hosted app behind a bare spinner, kept offering the previous file's GIF after
+    a file switch, ignored edited masses, and the phase movie's button existed only while the
+    animation was built. The made file is now kept per data file with its signature.
+    """
+    st.markdown("**Save this movie**")
+    state_key = f"{kind}_file_{data_key}"
+    fmts = video_formats()
+    e = st.columns([1.5, 1, 1.5, 2.2])
+    choice = e[0].radio("File type", [VIDEO_LABELS[f] for f in fmts], horizontal=True, key=f"{kind}_fmt",
+                        help="MP4: a small video file that plays in PowerPoint, Keynote and browsers. "
+                             "GIF: larger, loops on its own, works where video does not."
+                             + ("" if "mp4" in fmts else " (MP4 needs ffmpeg, which this install lacks: "
+                                                         "`pip install imageio-ffmpeg`.)"))
+    fmt = next(f for f in fmts if VIDEO_LABELS[f] == choice)
+    with e[1]:
+        st.write("")
+        clicked = st.button("Make the file", key=f"{kind}_make",
+                            help="Draws every frame with the options above; a few seconds.")
+    if clicked:
+        bar = st.progress(0.0, text="Drawing the frames…")
+        t0 = _time.time()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                out = render(Path(tmp) / f"movie.{fmt}",
+                             lambda i, n: bar.progress(min(1.0, i / max(n, 1)), text=f"Frame {i} of {n}"))
+                ext = out.suffix.lstrip(".").lower()
+                st.session_state[state_key] = dict(data=out.read_bytes(), ext=ext, name=f"{stem}.{ext}",
+                                                   signature=(signature, fmt), seconds=_time.time() - t0)
+        except Exception as exc:                                  # e.g. no spectrum fits the phase model
+            st.session_state.pop(state_key, None)
+            st.error(f"The movie could not be made: {exc}")
+        bar.empty()
+    made = st.session_state.get(state_key)
+    with e[2]:
+        st.write("")
+        if made:
+            st.download_button(f"Download {made['ext'].upper()} · {len(made['data']) / 1e6:.1f} MB", made["data"],
+                               made["name"], VIDEO_MIME[made["ext"]], key=f"{kind}_dl")
+    if made:
+        note = f"{made['name']} · made in {made['seconds']:.0f} s"
+        if made["signature"] != (signature, fmt):
+            note += " · **made with other settings** — press *Make the file* again to bring it up to date"
+        st.caption(note)
+    with e[3]:
+        st.write("")
+        if fig is not None:
+            def as_html(fig=fig):
+                return fig.to_html(full_html=True, include_plotlyjs=True, auto_play=False,
+                                   config={"displaylogo": False}).encode("utf-8")
+            st.download_button("Download interactive page (HTML)", as_html if DEFERRED_DOWNLOAD else as_html(),
+                               f"{stem}.html", "text/html", key=f"{kind}_html",
+                               help="The animation above as one file: opens in any browser, offline, with "
+                                    "Play, the time slider, zoom and hover. Made the moment you press.")
+        else:
+            st.caption("Turn on *Build the animation* to also save it as an interactive HTML page.")
 
 
 # --------------------------------------------------------------------------
@@ -2235,39 +2297,42 @@ with tab_movie:
             default_phase_pair(data, fits_m, data_key)      # same choice as the Phase tab would make
         la_m = float(st.session_state.get("phase_a", PAPER_LAMBDA_A))
         lb_m = float(st.session_state.get("phase_b", PAPER_LAMBDA_B))
-        if not build_movie:
-            pass
-        elif not any(f is not None for f in fits_m):
+        c = st.columns([1, 1, 1.2])
+        every_p = c[0].slider("Every N-th spectrum", 1, max(2, len(data) // 20),
+                              max(1, int(np.ceil(len(data) / MOVIE_MAX_FRAMES))), key="pm_every",
+                              help="Fewer frames load faster; the last spectrum is always included.")
+        fps_p = c[1].slider("Frames per second", 2, 30, 12, key="pm_fps")
+        fig_p = None
+        if build_movie and not any(f is not None for f in fits_m):
             st.info("No spectrum can be fitted with the phase model in the selected band.")
-        else:
-            c = st.columns([1, 1, 1.2])
-            every_p = c[0].slider("Every N-th spectrum", 1, max(2, len(data) // 20),
-                                  max(1, int(np.ceil(len(data) / MOVIE_MAX_FRAMES))), key="pm_every",
-                                  help="Fewer frames load faster; the last spectrum is always included.")
-            fps_p = c[1].slider("Frames per second", 2, 30, 12, key="pm_fps")
+        elif build_movie:
             rows_p = [int(r) for r in frame_rows(len(data), every_p, MOVIE_MAX_FRAMES) if fits_m[int(r)] is not None]
-            if build_movie:
-                st.plotly_chart(phase_movie_figure(data, rows_p, fits_m, la_m, lb_m, fps_p, cond_name, cond_unit),
-                                width="stretch")
-                st.caption(f"{len(rows_p)} frames · readout |φ({lb_m:g} nm) − φ({la_m:g} nm)|. Press ▶ Play, or "
-                           "drag the slider (time in minutes).")
-            with c[2]:
-                st.write("")
-                if st.button("Render as GIF for slides", key="pm_gif_btn",
-                             help="Draws every frame with matplotlib; takes a minute."):
-                    t0 = _time.time()
-                    with st.spinner("Rendering the GIF…"):
-                        gif = phase_movie_gif(data, fits_m, data_key, la_m, lb_m, every_p, fps_p, cond_name, cond_unit)
-                    st.session_state["phase_movie_gif"] = (gif, f"{Path(file_name).stem}_phase_movie.gif")
-                    st.caption(f"{len(gif) / 1e6:.1f} MB in {_time.time() - t0:.0f} s")
-                if "phase_movie_gif" in st.session_state:
-                    gif, name = st.session_state["phase_movie_gif"]
-                    st.download_button("Download GIF", gif, name, "image/gif", key="pm_gif_dl")
+            fig_p = phase_movie_figure(data, rows_p, fits_m, la_m, lb_m, fps_p, cond_name, cond_unit)
+            st.plotly_chart(fig_p, width="stretch")
+            st.caption(f"{len(rows_p)} frames · readout |φ({lb_m:g} nm) − φ({la_m:g} nm)|. Press ▶ Play, or "
+                       "drag the slider (time in minutes).")
+        every_pf = int(max(every_p, np.ceil(len(data) / MOVIE_MAX_FRAMES)))
+
+        def render_phase_file(out, tick):
+            # the fits come from the Phase tab's cache; the pair is decided here if nobody has yet
+            fits_f = phase_fits_cached(data, data_key, prominence, distance, smooth_window)
+            if f"phase_pair_{data_key}" not in st.session_state:
+                default_phase_pair(data, fits_f, data_key)
+            return render_phase_movie(data, out, fits=fits_f,
+                                      lambda_a=float(st.session_state.get("phase_a", PAPER_LAMBDA_A)),
+                                      lambda_b=float(st.session_state.get("phase_b", PAPER_LAMBDA_B)),
+                                      every=every_pf, fps=fps_p, cond_name=cond_name, cond_unit=cond_unit,
+                                      dpi=80, progress=tick)
+
+        save_movie_ui("phase_movie", data_key, render_phase_file,
+                      movie_signature(data, None, la_m, lb_m, every_pf, fps_p, prominence, distance, smooth_window,
+                                      cond_name, cond_unit),
+                      f"{Path(file_name).stem}_phase_movie", fig_p)
     else:
         st.markdown("The run as a movie: the spectrum frame by frame with its peaks and dips, the "
                     "map with a cursor at the current time, and the tracked fringes drawn as time advances "
                     "— the Igor Pro movie, in the browser.")
-        c = st.columns([1.3, 1, 1, 1.2])
+        c = st.columns([1.3, 1, 1])
         labels = list(table["fringe"])
         if labels:
             default_m = pick_default(table, tracked, has_cond)
@@ -2305,33 +2370,34 @@ with tab_movie:
         disp_m = smooth(data.spectra, smooth_window) if smooth_m else None
 
         rows_m = tuple(int(r) for r in frame_rows(len(data), every_m, MOVIE_MAX_FRAMES))
+        fig_m = None
         if build_movie:
             ext_m = movie_extrema(data, data_key, rows_m, prominence, distance, smooth_window, fit_m)
             all_m = ({k: disp[k] for k in tracked[tracked["stable"]]["fringe"]}
                      if panel_m == "All fringes" else None)
-            st.plotly_chart(movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m,
-                                         mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,
-                                         panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond,
-                                         spectra_disp=disp_m),
-                            width="stretch")
+            fig_m = movie_figure(data, rows_m, ext_m, movie_track, movie_label, cond_name, cond_unit, fps_m,
+                                 mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,
+                                 panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond,
+                                 spectra_disp=disp_m)
+            st.plotly_chart(fig_m, width="stretch")
             st.caption(f"{len(rows_m)} frames. Press ▶ Play, or drag the slider (time in minutes). "
                        "Peaks and dips are detected with the sidebar settings on every frame; grey markers are "
                        "their positions in the previous frames.")
-        with c[3]:
-            st.write("")
-            if st.button("Render as GIF for slides", help="Draws every frame with matplotlib using the options "
-                                                           "above (panel: one fringe); takes a minute."):
-                t0 = _time.time()
-                with st.spinner("Rendering the GIF…"):
-                    gif = movie_gif(data, movie_track, data_key, movie_label, every_m, fps_m,
-                                    prominence, distance, smooth_window, cond_name, cond_unit,
-                                    delta=(mode_m == "Change from first spectrum"), follow_nm=follow_nm_m,
-                                    trail=trail_m, mark_fringe=mark_m, smooth_display=smooth_m, width_fit=fit_m)
-                st.session_state["movie_gif"] = (gif, f"{Path(file_name).stem}_movie.gif")
-                st.caption(f"{len(gif) / 1e6:.1f} MB in {_time.time() - t0:.0f} s")
-            if "movie_gif" in st.session_state:
-                gif, name = st.session_state["movie_gif"]
-                st.download_button("Download GIF", gif, name, "image/gif")
+        every_mf = int(max(every_m, np.ceil(len(data) / MOVIE_MAX_FRAMES)))   # same frames as on screen
+        delta_m = mode_m == "Change from first spectrum"
+
+        def render_movie_file(out, tick):
+            return render_movie(data, out, track=movie_track, track_label=movie_label, every=every_mf, fps=fps_m,
+                                prominence=prominence, distance=distance, smooth_window=smooth_window,
+                                cond_name=cond_name, cond_unit=cond_unit, dpi=80, progress=tick, delta=delta_m,
+                                follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m, smooth_display=smooth_m,
+                                width_fit=fit_m)
+
+        save_movie_ui("movie", data_key, render_movie_file,
+                      movie_signature(data, movie_track, movie_label, every_mf, fps_m, prominence, distance,
+                                      smooth_window, cond_name, cond_unit, delta_m, follow_nm_m, trail_m, mark_m,
+                                      smooth_m, fit_m),
+                      f"{Path(file_name).stem}_movie", fig_m)
 
 # ---- export ---------------------------------------------------------------
 with tab_export:

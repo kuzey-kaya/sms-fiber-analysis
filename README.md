@@ -349,7 +349,13 @@ born — and the readout carries on without a jump.
 The same animation runs in the app's *Movie* tab with play/pause and a time
 slider, the options above under *Movie options*, a lower-right panel that can
 show one fringe (Igor style) or every tracked fringe's shift with the current
-points marked, and a "Render as GIF" button for slides.
+points marked. *Save this movie* underneath writes it out in seconds: an **MP4**
+(small, plays in PowerPoint, Keynote and browsers; ffmpeg comes with the
+`imageio-ffmpeg` package), a **GIF**, or — once the animation is built — the
+animation itself as one **interactive HTML page** that plays offline with the
+slider, zoom and hover. The frames are drawn by blitting (the static part of the
+figure once, only the moving artists per frame): a 132-frame movie of the strain
+run takes 5 s as MP4 instead of the former 60–100 s GIF.
 
 ### Presentation and 3-D figures
 
