@@ -85,6 +85,16 @@ loaded file was interpreted.
 | Movie | two movies, chosen at the top of the tab and built when *Build the animation* is turned on (a few seconds). *Spectra and fringes*: the run frame by frame (spectrum + extrema with fading trails, big temperature readout, map cursor, one fringe or all fringes in the lower-right panel) with Δ view and a camera that follows a fringe. *Phase readout (SM1E.2)*: numbered extrema, the cubic Δφ(λ) and λc moving, the readout growing (pair taken from the Phase tab). Both with play/pause, a time slider and GIF export for slides |
 | Export | tracked fringes (wide/long CSV), fringe table, the settings used, load steps, Igor Text files |
 
+**Every graph has its own export row** underneath it — *Export this graph: PNG · SVG ·
+Data (CSV)* — so one graph can be taken on its own without the Export tab. The picture is made
+by the browser from the graph as it is on screen (zoom, hidden curves, the page's light or dark
+theme; PNG at twice the screen size, SVG as a vector drawing). The CSV holds the numbers drawn
+in that graph: one column per curve next to the x column they share; curves on other x values
+(a spectrum and its peak markers, the points and their fitted line) side by side as `x1:`/`y1:`,
+`x2:`/`y2:` groups; a map as the matrix drawn. Headers are plain ASCII (`phi`, `lambda`, `degC`)
+so Igor and Excel read them as they are (`sms_analysis/figure_export.py`). The movies have
+*This frame as a picture* next to their own *Save this movie*.
+
 Sidebar settings: data source (the example cooldown `data/data.csv` or an uploaded
 file) and the **Load-step run** checkbox, condition name/unit and column overrides (for runs where strain, load, …
 was varied instead of temperature), wavelength range, detection (prominence,

@@ -195,6 +195,11 @@ GitHub's free monthly allowance is limited.
   top is flat) is flagged under the tiles and hidden in the shift plot; untick
   *Hide flickering fringes* to see it. For noisy spectra the movie draws the
   smoothed curve and width-fits the markers (*Movie options*).
+- **Saving one graph:** under every graph there is a small row, *Export this graph*:
+  **PNG** and **SVG** save the picture as it is on screen (zoom in first if you want a
+  detail; SVG stays sharp at any size), **Data (CSV)** saves the numbers drawn in that
+  graph, one column per curve. The picture follows the page's light or dark theme — for
+  a white background choose *Light* in the app menu (⋮ → Settings).
 - **Saving a movie:** on the Movie tab, *Save this movie* → *Make the file* gives an
   MP4 (or a GIF) of the run you have loaded, your own upload included, in a few
   seconds with a progress bar; *Download interactive page (HTML)* (shown once

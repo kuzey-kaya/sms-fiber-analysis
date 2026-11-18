@@ -226,6 +226,30 @@ It is a continuous cooldown — no setpoint steps.
   Igor Text format asks. Still true: no `.itx` has ever been loaded in a real Igor (none on this
   machine) — the advisor has to try one. Tests `tests/test_export.py`,
   `test_app.py::test_downloads_do_not_rerun_the_page`.
+  2026-11-17 (the advisor, by mail and through the owner: "can you make the movie exportable?" —
+  it already was since the 16th — then "every graph, the phase ones too, exportable on its own, as a
+  picture and as data; not all together, each one by itself"). `show_figure(fig, name, target=None,
+  data=True, label=)` replaces every `st.plotly_chart` (the only call left is inside it; 14 graphs +
+  the two movies with `data=False`): the graph in `st.container(key="fig_<name>")` and under it a
+  horizontal row `figrow_<name>` — caption, the `figure_image` component, `Data (CSV)`
+  (`fig_<name>_csv`, deferred, `NO_RERUN`). Picture: `st.components.v2.component` (inline, no iframe,
+  shadow DOM) with PNG / SVG buttons whose JS finds the `.js-plotly-plot` inside `.st-key-fig_<name>`,
+  sets `graph._context.toImageButtonOptions = {format, filename, scale}` and clicks the graph's own
+  modebar button (`.modebar-btn[data-title^="Download plot"]`); Plotly reads the options and clones
+  the layout synchronously, so they are put back right after. Nothing is rendered on the server (no
+  kaleido / Chrome — kaleido v1 needs a Chrome on Streamlit Cloud, v0 hangs on Windows). The picture
+  is the graph as on screen: zoom, hidden curves, the page theme (Streamlit puts the theme's
+  background into the template, so a dark page gives a dark picture). Streamlit without
+  `st.components.v2` or horizontal containers falls back to the CSV button + a hint at the camera
+  icon. Data: `sms_analysis/figure_export.py` — `figure_table(fig)` (curves on the same x share the x
+  column; a curve on part of another's strictly increasing x joins it with empty cells — a fringe
+  that lost lock; other x values → `x1:`/`y1:`, `x2:`/`y2:` groups padded to the longest; marker
+  `text` → `… label`, error bars → `… ±`; a heatmap / surface → the matrix as drawn, overlays left
+  out; stacked panels take the title of the axis they `matches`), `figure_csv` (10 significant
+  digits, headers and labels through `ascii_text`: φ → phi, λ → lambda, °C → degC, ± → +/-, because
+  Igor 6 and Excel read a CSV in the system code page), `safe_name`. Tried in the browser on the
+  local app: PNG 1400–1660 px wide, SVG, CSV for 11 graphs + the movie still. Tests
+  `tests/test_figure_export.py`, `test_app.py::test_every_graph_has_its_own_export_row`.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,

@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import inspect
 import io
 import json
 import tempfile
@@ -33,6 +34,7 @@ from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_
                           track_all_extrema)
 from sms_analysis.igor_export import findpeak_itx, spectra_itx, track_names, tracks_itx
 from sms_analysis.export import condition_column, frame_csv, long_table, wide_table
+from sms_analysis.figure_export import figure_csv, safe_name
 from sms_analysis.findpeak import points_to_nm, track_findpeak
 from sms_analysis.peaks import smooth
 from sms_analysis.tracking import flicker_fraction, refine_width_fit
@@ -77,6 +79,9 @@ STYLE = """
 <style>
 .block-container {padding-top: 3.4rem; padding-bottom: 2.5rem;}
 .stAppDeployButton {display: none;}
+[class*="st-key-fig_"][class*="_csv"] button {min-height:1.9rem; padding:0.1rem 0.7rem;}
+[class*="st-key-fig_"][class*="_csv"] button p {font-size:0.8rem;}
+[class*="st-key-figrow_"] {margin-top:-0.6rem; margin-bottom:0.4rem;}
 .fl-hero {display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:0;}
 .fl-hero h1 {font-size:2.4rem; font-weight:700; letter-spacing:-0.02em; margin:0; padding:0; line-height:1.1;}
 .fl-hero .fl-tag {font-size:0.95rem; opacity:0.62;}
@@ -150,7 +155,7 @@ def hero(tagline: str, strip: str = "", strip_note: str = "") -> None:
 def footer() -> None:
     st.markdown(f'<div class="fl-foot">{APP_NAME} · SMS fiber-sensor fringe analysis · '
                 f'<a href="{REPO_URL}" target="_blank">source &amp; handbook on GitHub</a> · '
-                'figures: hover for values, drag to zoom, camera icon to save as PNG</div>',
+                'figures: hover for values, drag to zoom; under each one: PNG, SVG and its data as CSV</div>',
                 unsafe_allow_html=True)
 
 
@@ -1191,6 +1196,91 @@ DEFERRED_DOWNLOAD = "callable" in (st.download_button.__doc__ or "")
 # strain run: wide CSV ok, Settings 1.7 s later not). A download changes nothing — no rerun.
 NO_RERUN = {"on_click": "ignore"}
 
+# ---- one export row under every graph (the advisor, 2026-11-17: "each graph on its own, as a
+# picture and as data") --------------------------------------------------------------------------
+# The picture is made by the browser from the graph as it is on screen (zoom, hidden curves and
+# all): the two buttons set the format and the file name on the Plotly graph next to them and
+# press its own "download plot" button. Nothing is rendered on the server — no Chrome, no kaleido.
+FIGURE_IMAGE_HTML = """
+<div class="row">
+  <button type="button" data-format="png" title="Picture of this graph as it is on screen (PNG, 2x)">PNG</button>
+  <button type="button" data-format="svg" title="The same as a vector drawing (SVG): sharp at any size, editable">SVG</button>
+  <span class="note"></span>
+</div>
+"""
+FIGURE_IMAGE_CSS = """
+:host { display: inline-block; }
+.row { display: flex; align-items: center; gap: 0.4rem; font-family: inherit; }
+button {
+  font: inherit; font-size: 0.8rem; line-height: 1.2; min-height: 1.9rem; padding: 0.1rem 0.7rem;
+  border-radius: 0.5rem; border: 1px solid rgba(128, 128, 128, 0.45); background: transparent;
+  color: inherit; cursor: pointer;
+}
+button:hover { border-color: var(--st-primary-color, #c0392b); color: var(--st-primary-color, #c0392b); }
+.note { font-size: 0.75rem; opacity: 0.75; }
+"""
+FIGURE_IMAGE_JS = """
+export default function (component) {
+  const { parentElement, data } = component;
+  const host = parentElement.host || parentElement;
+  const note = parentElement.querySelector('.note');
+  parentElement.querySelectorAll('button[data-format]').forEach((button) => {
+    button.onclick = () => {
+      const box = host.closest('.' + data.box);
+      const graph = box ? box.querySelector('.js-plotly-plot') : null;
+      const camera = graph ? graph.querySelector('.modebar-btn[data-title^="Download plot"]') : null;
+      if (!graph || !graph._context || !camera) {
+        note.textContent = 'use the camera icon at the top right of the graph';
+        return;
+      }
+      const format = button.dataset.format;
+      const before = graph._context.toImageButtonOptions;
+      graph._context.toImageButtonOptions = {
+        format: format, filename: data.filename, scale: format === 'png' ? 2 : 1,
+      };
+      camera.click();
+      graph._context.toImageButtonOptions = before;
+      note.textContent = '';
+    };
+  });
+}
+"""
+HORIZONTAL_ROWS = "horizontal" in inspect.signature(st.container).parameters
+try:
+    figure_image = (st.components.v2.component("fringelab_figure_image", html=FIGURE_IMAGE_HTML,
+                                               css=FIGURE_IMAGE_CSS, js=FIGURE_IMAGE_JS)
+                    if HORIZONTAL_ROWS else None)
+except Exception:                                     # an older Streamlit: no inline components
+    figure_image = None
+
+
+def show_figure(fig, name: str, target=None, data: bool = True, label: str = "Export this graph"):
+    """Draw a Plotly figure with its own small export row: the picture (PNG / SVG, made in the
+    browser from the graph as shown) and the data drawn in it (CSV, ``figure_csv``).
+
+    ``name`` is the graph's short name: part of the file names and of the element keys, so it must
+    be unique among the graphs on the page. ``data=False`` leaves the CSV out (the movies: a
+    still of the frame on screen is all there is to add to their own export)."""
+    target = st if target is None else target
+    stem = f"{safe_name(Path(file_name).stem)}_{name}"
+    box = target.container(key=f"fig_{name}")
+    box.plotly_chart(fig, width="stretch")
+    as_csv = None if not data else (lambda: figure_csv(fig)) if DEFERRED_DOWNLOAD else figure_csv(fig)
+    csv_help = "The numbers drawn in this graph, one column per curve (a map: the matrix as drawn)."
+    if figure_image is None:
+        row = box.columns([1.2, 3])
+        if data:
+            row[0].download_button("Data (CSV)", as_csv, f"{stem}.csv", "text/csv", key=f"fig_{name}_csv",
+                                   help=csv_help, **NO_RERUN)
+        row[1].caption("Picture: the camera icon at the top right of the graph.")
+        return
+    with box.container(horizontal=True, vertical_alignment="center", gap="small", key=f"figrow_{name}"):
+        st.caption(label, width="content")
+        figure_image(key=f"fig_{name}_img", data={"box": f"st-key-fig_{name}", "filename": stem}, width="content")
+        if data:
+            st.download_button("Data (CSV)", as_csv, f"{stem}.csv", "text/csv", key=f"fig_{name}_csv",
+                               help=csv_help, **NO_RERUN)
+
 
 def movie_signature(data, track=None, *options) -> str:
     """Fingerprint of everything a rendered movie depends on: the condition values (the masses of
@@ -1686,8 +1776,7 @@ with tab_map:
         z, z_title = data.spectra, "Transmittance"
 
     overlay = {k: disp[k] for k in tracked["fringe"]} if show_tracks else {}
-    st.plotly_chart(map_figure(data, z, y_mode, cond_title, cmap, zmid, clip, z_title, overlay),
-                    width="stretch")
+    show_figure(map_figure(data, z, y_mode, cond_title, cmap, zmid, clip, z_title, overlay), "map")
     st.caption("Every row is one spectrum; bright and dark bands are interference fringes. "
                "White lines are the fringes followed by the tracker. Drag to zoom, double-click to reset.")
 
@@ -1714,8 +1803,7 @@ with tab_spec:
     if show_smooth:
         ext = replace(ext, peak_values=np.interp(ext.peak_wavelengths, data.wavelengths, data_spec.spectra[row]),
                       dip_values=np.interp(ext.dip_wavelengths, data.wavelengths, data_spec.spectra[row]))
-    st.plotly_chart(spectrum_figure(data_spec, row, ext, overlay_rows, cond_name, cond_unit),
-                    width="stretch")
+    show_figure(spectrum_figure(data_spec, row, ext, overlay_rows, cond_name, cond_unit), "spectrum")
     info = f"t = {data.time[row]:.0f} s"
     if has_cond:
         info += f" · {cond_name} = {data.temperature[row]:.2f} {cond_unit}"
@@ -1751,7 +1839,7 @@ with tab_track:
                                    key=f"shift_fringes_{data_key}", placeholder="All tracked fringes",
                                    format_func=lambda k: f"{k} nm · locked {lock_of[k]:.0f}%")
         shown = shift_sel or pool
-        st.plotly_chart(shifts_figure({k: disp[k] for k in shown}, x_mode, cond_title), width="stretch")
+        show_figure(shifts_figure({k: disp[k] for k in shown}, x_mode, cond_title), "shifts")
         st.caption(f"Each line is one fringe from the first spectrum, shown as its shift from where it started "
                    f"({_drawn}; *Smooth the drawn lines* in the sidebar sets how much). Pick one or a few "
                    "fringes above to look at them alone.")
@@ -1777,7 +1865,7 @@ with tab_track:
         left, right = st.columns(2)
         if len(chosen) > 1:
             sel = {k: disp[k] for k in chosen}
-            left.plotly_chart(igor_multi_figure(sel, has_cond, cond_title), width="stretch")
+            show_figure(igor_multi_figure(sel, has_cond, cond_title), "fringes_igor", left)
             left.caption("Each fringe as its shift from where it started (left axis) and the condition "
                          "(blue dotted, right axis) against time.")
             if has_cond:
@@ -1791,7 +1879,7 @@ with tab_track:
                     rows.append(dict(fringe=k, sensitivity=f.slope * 1e3, stderr=f.stderr * 1e3,
                                      r_squared=f.r_squared, points=f.n_points))
                 if fits_sel:
-                    right.plotly_chart(calibration_multi_figure(fits_sel, cond_title, cond_unit), width="stretch")
+                    show_figure(calibration_multi_figure(fits_sel, cond_title, cond_unit), "calibrations", right)
                     st.dataframe(pd.DataFrame(rows).rename(columns={
                         "sensitivity": f"sensitivity (pm/{cond_unit})", "stderr": f"± (pm/{cond_unit})",
                         "r_squared": "R²"}), hide_index=True, width="stretch",
@@ -1818,8 +1906,8 @@ with tab_track:
                                              "axis fits the data range and shows the wobbles.")
             with left:
                 cur_tr = cursor_panel(igor_track, f"igor_{data_key}", igor_title, _plat)
-            left.plotly_chart(igor_figure(igor_track, has_cond, igor_title, cursors=cur_tr, from_zero=zero_tr),
-                              width="stretch")
+            show_figure(igor_figure(igor_track, has_cond, igor_title, cursors=cur_tr, from_zero=zero_tr),
+                        "fringe_igor", left)
             left.caption("Igor-style view: tracked wavelength (red, left axis) and "
                          f"{igor_title} (blue, right axis) against time.")
         if len(chosen) == 1 and has_cond:
@@ -1831,8 +1919,8 @@ with tab_track:
                                     help="Linear: one sensitivity for the whole run. Quadratic: the "
                                          "sensitivity changes along the run, as it does close to the "
                                          "critical wavelength. The lower panel shows measured − fitted.")
-                right.plotly_chart(calibration_figure(track_d, curv, model, cond_title, cond_unit),
-                                   width="stretch")
+                show_figure(calibration_figure(track_d, curv, model, cond_title, cond_unit),
+                            "calibration", right)
                 s_lo, s_hi = curv.sensitivity_at_ends_pm
                 q = curv.quadratic
                 right.caption(
@@ -1956,14 +2044,14 @@ with tab_igor:
                                      "temperature with 0.3 °C wobbles then draws as a flat line. Off = the "
                                      "axis fits the data range and shows the wobbles.")
     cur_fp = cursor_panel(igor_fp, f"{fk}_cur", igor_title_fp, _plat)
-    st.plotly_chart(igor_figure(igor_fp, has_cond, igor_title_fp, cursors=cur_fp, from_zero=zero_fp), width="stretch")
+    show_figure(igor_figure(igor_fp, has_cond, igor_title_fp, cursors=cur_fp, from_zero=zero_fp), "findpeak")
     st.caption(f"Igor's graph: V_PeakLoc (red, left) and {igor_title_fp} (blue, right) against time; "
                f"lines drawn {_drawn}. A frame whose range holds no such extremum is a gap — widen the "
                "range or move it when that happens, as in Igor.")
     if has_cond and np.isfinite(w_fp).sum() >= 3:
         cond_fp = step_cond if step_cond is not None else data.temperature
-        st.plotly_chart(shift_vs_condition_figure(w_fp, cond_fp, cond_title, cond_unit, _plat, fp_fit),
-                        width="stretch")
+        show_figure(shift_vs_condition_figure(w_fp, cond_fp, cond_title, cond_unit, _plat, fp_fit),
+                    "findpeak_shift")
         st.caption(f"Igor's second graph (`display shift vs {cond_name.lower()}`): the peak's shift from "
                    + ("the first plateau, one open circle per load step (the frames faint behind it)"
                       if _plat is not None else "the first spectrum, every spectrum a point")
@@ -2021,7 +2109,7 @@ with tab_sens:
     min_r2 = st.slider("Minimum R² to include", 0.0, 1.0, 0.9, 0.01)
     shown = table[table["r_squared"] >= min_r2] if has_cond else table
     if has_cond and len(shown):
-        st.plotly_chart(sensitivity_figure(shown, cond_unit), width="stretch")
+        show_figure(sensitivity_figure(shown, cond_unit), "sensitivity")
     elif has_cond:
         st.info("No fringe passes the R² threshold.")
     else:
@@ -2201,12 +2289,12 @@ with tab_phase:
         tiles += [("Mode powers t1, t2", f"{t1:.2f}, {t2:.2f}",
                    f"visibility {vis:.2f} · fit RMS {np.nanmedian(ser_local['rms_local']):.4f} (T)")]
         stat_strip(tiles)
-        st.plotly_chart(phase_profile_figure(data, fit0_p), width="stretch")
+        show_figure(phase_profile_figure(data, fit0_p), "phase_profile")
         ser_d = ser.assign(phase_diff=smooth_series(ser["phase_diff"].to_numpy(float), smooth_frames,
                                                     smooth_flatten, _plat))
         st.caption(f"Readout drawn as {_drawn.replace('as tracked', 'fitted frame by frame')} "
                    "(*Smooth the drawn lines* in the sidebar); the fit and the numbers above use every frame.")
-        st.plotly_chart(phase_readout_figure(ser_d, sens_p, la, lb, has_cond, cond_title), width="stretch")
+        show_figure(phase_readout_figure(ser_d, sens_p, la, lb, has_cond, cond_title), "phase_readout")
         if has_cond and "phase_diff_cubic" in ser_local:
             with st.expander("Cubic vs local fit on this run · same frames, same pair",
                              expanded=True, icon=":material/compare:"):
@@ -2234,7 +2322,7 @@ with tab_phase:
                         f"{abs(cmp[f'slope (mrad/{cond_unit})'].iloc[1] - cmp[f'slope (mrad/{cond_unit})'].iloc[0]):.1f} "
                         f"mrad/{cond_unit}.{pn} The figures above use the **{used}**"
                         + (" (Auto picked it)." if phase_method == PHASE_METHODS[0] else "."))
-                    st.plotly_chart(phase_compare_figure(ser_local, cond_title, cond_unit), width="stretch")
+                    show_figure(phase_compare_figure(ser_local, cond_title, cond_unit), "phase_compare")
                     st.caption("Top: the two readouts over the run (grey = cubic only, red = with the local fit). "
                                "Bottom: what is left after taking each one's own straight line out — the width of "
                                "that band is the noise of the method. To repeat the check on another run: upload "
@@ -2280,7 +2368,7 @@ with tab_3d:
     cmap3 = c[1].selectbox("Colours", ["Viridis", "Plasma", "Inferno", "Cividis", "Turbo"], key="c3")
     if c[2].toggle("Draw the 3-D surface", False,
                    help="Off by default because the surface takes a moment to draw."):
-        st.plotly_chart(surface_figure(data, y3, cond_title, cmap3), width="stretch")
+        show_figure(surface_figure(data, y3, cond_title, cmap3), "surface_3d")
         st.caption("Transmittance as height. Drag to rotate, scroll to zoom.")
 
 # ---- movie ----------------------------------------------------------------
@@ -2319,7 +2407,7 @@ with tab_movie:
         elif build_movie:
             rows_p = [int(r) for r in frame_rows(len(data), every_p, MOVIE_MAX_FRAMES) if fits_m[int(r)] is not None]
             fig_p = phase_movie_figure(data, rows_p, fits_m, la_m, lb_m, fps_p, cond_name, cond_unit)
-            st.plotly_chart(fig_p, width="stretch")
+            show_figure(fig_p, "phase_movie", data=False, label="This frame as a picture")
             st.caption(f"{len(rows_p)} frames · readout |φ({lb_m:g} nm) − φ({la_m:g} nm)|. Press ▶ Play, or "
                        "drag the slider (time in minutes).")
         every_pf = int(max(every_p, np.ceil(len(data) / MOVIE_MAX_FRAMES)))
@@ -2391,7 +2479,7 @@ with tab_movie:
                                  mode=mode_m, follow_nm=follow_nm_m, trail=trail_m, mark_fringe=mark_m,
                                  panel=panel_m, all_tracks=all_m, big_readout=big_m and has_cond,
                                  spectra_disp=disp_m)
-            st.plotly_chart(fig_m, width="stretch")
+            show_figure(fig_m, "movie", data=False, label="This frame as a picture")
             st.caption(f"{len(rows_m)} frames. Press ▶ Play, or drag the slider (time in minutes). "
                        "Peaks and dips are detected with the sidebar settings on every frame; grey markers are "
                        "their positions in the previous frames.")
@@ -2414,7 +2502,8 @@ with tab_movie:
 # ---- export ---------------------------------------------------------------
 with tab_export:
     st.write("Download the results for the current file and settings. "
-             "Any figure can be saved as PNG with the camera icon that appears above it.")
+             "Every graph has its own export row underneath it: the picture (PNG, SVG) and the data drawn "
+             "in it (CSV).")
     # The condition column is called what it is ("temperature", "mass", ...) in both files, and on
     # a load run both carry the step values with the settle rows blank — the values the fits and
     # the Igor file's `mass` wave use — next to the file's own temperature.

@@ -267,3 +267,14 @@ def test_downloads_do_not_rerun_the_page(app):
     assert all(b.proto.ignore_rerun for b in buttons), [b.label for b in buttons if not b.proto.ignore_rerun]
     note = [c.value for c in app.caption if c.value.startswith("In both CSV files")]
     assert note and "`temperature`" in note[0] and "put on or taken off" not in note[0]
+
+
+def test_every_graph_has_its_own_export_row(app):
+    """2026-11-17, the advisor: each graph exportable on its own, picture and data. Every Plotly
+    graph sits in a keyed box with a "Data (CSV)" button; the picture buttons are a browser-side
+    component (tried by hand in the browser: they press the graph's own download button)."""
+    csv = [b for b in app.get("download_button") if b.label == "Data (CSV)"]
+    assert len(csv) >= 8, len(csv)                       # map, spectrum, shifts, Igor view, calibration, ...
+    assert all(b.proto.ignore_rerun for b in csv)
+    # no graph is drawn outside show_figure: the only plotly_chart call is the one inside it
+    assert Path(APP).read_text(encoding="utf-8").count("plotly_chart(") == 1
