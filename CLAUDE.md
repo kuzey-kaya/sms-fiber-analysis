@@ -250,6 +250,19 @@ It is a continuous cooldown — no setpoint steps.
   Igor 6 and Excel read a CSV in the system code page), `safe_name`. Tried in the browser on the
   local app: PNG 1400–1660 px wide, SVG, CSV for 11 graphs + the movie still. Tests
   `tests/test_figure_export.py`, `test_app.py::test_every_graph_has_its_own_export_row`.
+  2026-11-18 (the advisor made a SIMULATED temperature ramp, `sms-sim-temperature-2026-11-18.csv` in
+  the owner's Downloads — 31 spectra, 20 → 50 °C in 1 °C / 1 s steps, 1475–1575 nm at 0.01 nm, no
+  noise — and wrote "it gives the peak locations exactly the same for the first three time values").
+  The tracker was right (every frame distinct; 40 fringes, 36 locked on all 31 frames, −78 … −264 and
+  +72 … +282 pm/°C growing toward λc ≈ 1521 nm, phase fits 31/31). The repeat came from the drawn
+  lines: `smooth_series` used `scipy.signal.medfilt`, which pads the ends with zeros; zeros sort below
+  any wavelength, so with the default 5-frame median a falling fringe was drawn as x2, x2, x2, x3, …
+  and a rising one ended …, x[n-3] three times (wrong on every file, visible only on a short clean
+  one; since 2026-11-17 the per-graph CSV carried it too). → `sms_analysis/smoothing.py`
+  `running_median`: the window shrinks symmetrically at the ends, a ramp comes back unchanged; used by
+  `smooth_series` and by `steps.detect_plateaus` (plateau tables on the strain run identical for all
+  20 fringes). The legacy trackers keep `medfilt` (exact reproduction of the Colab code). Tests
+  `tests/test_smoothing.py`. The advisor's file is not in the repo.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,

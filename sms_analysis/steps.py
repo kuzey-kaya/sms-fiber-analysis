@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy.signal import medfilt
+
+from .smoothing import running_median
 
 
 def robust_jitter(x: np.ndarray) -> float:
@@ -56,7 +57,7 @@ def detect_plateaus(
         return pd.DataFrame(columns=["plateau", "start", "end", "t_start", "t_end", "n", "mean", "std", "shift"])
     filled = pd.Series(w).ffill().bfill().to_numpy()
     k = max(1, median_kernel | 1)
-    smooth = medfilt(filled, k) if n > k else filled
+    smooth = running_median(filled, k) if n > k else filled      # no zero padding at the ends
     if min_jump is None:
         min_jump = max(0.15, 8.0 * robust_jitter(w))
     jumps = np.flatnonzero(np.abs(np.diff(smooth)) > min_jump) + 1

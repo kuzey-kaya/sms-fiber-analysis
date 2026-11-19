@@ -35,6 +35,7 @@ from sms_analysis import (curvature_test, detect_extrema, fit_sensitivity, load_
 from sms_analysis.igor_export import findpeak_itx, spectra_itx, track_names, tracks_itx
 from sms_analysis.export import condition_column, frame_csv, long_table, wide_table
 from sms_analysis.figure_export import figure_csv, safe_name
+from sms_analysis.smoothing import running_median
 from sms_analysis.findpeak import points_to_nm, track_findpeak
 from sms_analysis.peaks import smooth
 from sms_analysis.tracking import flicker_fraction, refine_width_fit
@@ -1561,9 +1562,8 @@ def smooth_series(values: np.ndarray, frames: int, flatten: bool, plateaus) -> n
     if frames <= 1 and not (flatten and plateaus is not None):
         return w
     ok = np.isfinite(w)
-    if frames > 1 and ok.sum() >= frames:
-        from scipy.signal import medfilt
-        w[ok] = medfilt(w[ok], frames)
+    if frames > 1 and ok.sum() >= 3:
+        w[ok] = running_median(w[ok], frames)      # not scipy's medfilt: it pads the ends with zeros
     if flatten and plateaus is not None:
         for _, p in plateaus.iterrows():
             a, b = int(p["start"]), int(p["end"]) + 1
