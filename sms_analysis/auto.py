@@ -20,7 +20,7 @@ import pandas as pd
 
 from .analysis import fit_sensitivity
 from .io import SpectraSet
-from .steps import classify_plateaus, default_step_values, detect_plateaus, robust_jitter, step_condition
+from .steps import default_step_values, detect_plateaus, is_step_run, robust_jitter, step_condition
 from .tracking import flicker_fraction, track_all_extrema
 
 FLICKER_LIMIT_PCT = 5.0   # as in app.py
@@ -125,7 +125,7 @@ def choose(data: SpectraSet, prominence: float = 0.02, distance: int = 5, smooth
         # advisor says otherwise, with the frames recorded while the load changed left out
         ref = choice.track
         pl = detect_plateaus(ref["time"].to_numpy(float), ref["wavelength"].to_numpy(float))
-        if len(pl) >= 3 and classify_plateaus(pl).any():
+        if is_step_run(pl):
             vals = default_step_values(pl, step_start, step_increment, 0.0)
             choice.plateaus, choice.step_values = pl, vals
             choice.step_cond = step_condition(len(ref), pl, vals, settle)

@@ -44,8 +44,8 @@ from sms_analysis.movie import frame_rows, render_movie, render_phase_movie, vid
 from sms_analysis.phase import (EDGE_CLEARANCE, PAPER_LAMBDA_A, PAPER_LAMBDA_B, local_fit, phase_fits, phase_sensitivity,
                                 window_clearance,
                                 phase_series, scan_pairs, tracked_phase_change)
-from sms_analysis.steps import (classify_plateaus, default_step_values, detect_plateaus, robust_jitter,
-                                step_condition)
+from sms_analysis.steps import (classify_plateaus, default_step_values, detect_plateaus, is_step_run,
+                                robust_jitter, step_condition)
 
 APP_NAME = "FringeLab"
 ROOT = Path(__file__).resolve().parent
@@ -1488,7 +1488,7 @@ if kind_key not in st.session_state:
         good = wtab[(wtab["locked_pct"] >= 90) & wtab["stable"]]["fringe"]
         for k in good:
             pl = detect_plateaus(wide_probe[k]["time"].to_numpy(), wide_probe[k]["wavelength"].to_numpy())
-            if len(pl) >= 3 and classify_plateaus(pl).any():
+            if is_step_run(pl):
                 steps_found = True
                 break
     st.session_state[kind_key] = steps_found
@@ -1591,7 +1591,7 @@ step_cond = None        # the step condition with the settle rows blanked (what 
 def _plateaus_of(label: str):
     tr = tracks[label]
     p = detect_plateaus(tr["time"].to_numpy(), tr["wavelength"].to_numpy())
-    return p if len(p) >= 3 and classify_plateaus(p).any() else None
+    return p if is_step_run(p) else None
 
 
 if len(tracked):
@@ -2010,6 +2010,19 @@ with tab_igor:
     fp = findpeak_cached(data, data_key, float(a_fp), float(b_fp), int(box_fp), neg, min_level)
     found = float(fp["found"].mean() * 100)
     w_fp = fp["wavelength"].to_numpy(float)
+    # A fixed range follows one fringe only while it holds one extremum of that kind. A fringe that
+    # moves by more than its period (the 90 -> 18 degC cooldown of 2026-11-19: 33 nm) needs a range
+    # that holds several, FindPeak returns the first of them — in Igor too — and the "track" hops.
+    seen_fp = w_fp[np.isfinite(w_fp)]
+    hops_fp = int((np.abs(np.diff(seen_fp)) > half_nm).sum()) if seen_fp.size > 1 else 0
+    if abs(b_fp - a_fp) > 2 * half_nm and hops_fp:
+        st.warning(f"The range is {abs(b_fp - a_fp):.0f} nm wide, more than one fringe period "
+                   f"(about {2 * half_nm:.0f} nm here), so it holds several {'dips' if neg else 'peaks'}. FindPeak "
+                   f"returns the first one in the range, as Igor's does, and in {hops_fp} spectra that was a "
+                   "different fringe than in the spectrum before: the curve and the sensitivity below mix "
+                   "several fringes. A fixed range cannot follow a fringe that moves by more than its period — "
+                   "use the *Fringe tracking* tab for it, or set a narrower range by hand for the part of the "
+                   "run you want.", icon=":material/warning:")
     tiles = [("Range", f"{a_fp:.1f}–{b_fp:.1f} nm", f"{int(((data.wavelengths >= min(a_fp, b_fp)) & (data.wavelengths <= max(a_fp, b_fp))).sum())} samples per spectrum"),
              ("Found", f"{found:.0f} %", "spectra with a peak inside the range"),
              ("Peak wavelength", f"{np.nanmin(w_fp):.2f} → {np.nanmax(w_fp):.2f} nm" if np.isfinite(w_fp).any() else "—",

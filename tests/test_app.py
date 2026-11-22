@@ -278,3 +278,27 @@ def test_every_graph_has_its_own_export_row(app):
     assert all(b.proto.ignore_rerun for b in csv)
     # no graph is drawn outside show_figure: the only plotly_chart call is the one inside it
     assert Path(APP).read_text(encoding="utf-8").count("plotly_chart(") == 1
+
+
+def test_a_fast_temperature_ramp_is_a_continuous_run(tmp_path):
+    """2026-11-19: a cooldown that starts fast was pre-set as a load-step run (condition "Mass",
+    fits against 0 / 50 g). The first look must leave it a continuous run with its temperature."""
+    import numpy as np
+    import pandas as pd
+    from sms_analysis.synthetic import simulate_run
+    data, _ = simulate_run(n_frames=40, common_rad=8 * np.pi, tilt_rad=0.0, noise=0.001, seed=1)
+    frame = pd.DataFrame(data.spectra, columns=[f"{w:g}" for w in data.wavelengths])
+    frame.insert(0, "time", np.arange(len(data)) * 30.0)
+    frame.insert(0, "temperature", np.linspace(90.0, 20.0, len(data)))
+    path = tmp_path / "ramp.csv"
+    frame.to_csv(path, index=False)
+    os.environ["FRINGELAB_EXAMPLE"] = str(path)
+    try:
+        at = AppTest.from_file(APP, default_timeout=600).run()
+    finally:
+        os.environ.pop("FRINGELAB_EXAMPLE", None)
+    assert not at.exception, [str(e.value) for e in at.exception]
+    status = [c.value for c in at.caption if "Tracking:" in c.value]
+    assert status and status[0].startswith("**Continuous run**") and "**Temperature** from the file" in status[0]
+    kind = [c for c in at.checkbox if c.label.startswith("Load-step run")]
+    assert kind and not kind[0].value

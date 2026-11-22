@@ -6,3 +6,4 @@ __pycache__/
 Thumbs.db
 graphify-out/
 report_prompt.md
+advisor_runs/

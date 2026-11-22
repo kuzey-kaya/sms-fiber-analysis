@@ -50,3 +50,39 @@ def test_cooldown_has_no_steps(tracks):
     tr = tracks["dip@1542.3"]
     p = detect_plateaus(tr["time"].to_numpy(), tr["wavelength"].to_numpy())
     assert len(p) == 1
+
+
+def test_a_fast_ramp_is_not_a_load_step_run(steps):
+    """2026-11-19, the advisor's 90 -> 18 degC cooldown: at 1 degC per spectrum the fringe moved more
+    than the jump threshold between spectra, the start was cut into two short "plateaus", the other
+    1389 spectra (a 12 nm drift) became the third, and the app asked for masses. Plateaus must be flat."""
+    import numpy as np
+    from sms_analysis.auto import choose
+    from sms_analysis.steps import detect_plateaus, classify_plateaus, is_step_run, plateau_flatness
+    from sms_analysis.synthetic import simulate_run
+
+    # an exponential cooldown seen by one fringe: fast at first, then a long slow tail
+    t = np.arange(1400) * 33.0
+    w = 1558.0 + 14.0 * np.exp(-t / 6000.0) + np.random.default_rng(0).normal(0, 0.005, t.size)
+    p = detect_plateaus(t, w)
+    if len(p) >= 3 and classify_plateaus(p).any():          # what the old rule accepted
+        assert plateau_flatness(p) > 0.2
+    assert not is_step_run(p)
+    # a simulated ramp that the old rule took for steps (poor lock with the standard tracker)
+    ramp, _ = simulate_run(n_frames=40, common_rad=8 * np.pi, tilt_rad=0.0, noise=0.001, seed=1)
+    assert choose(ramp).plateaus is None
+    # real staircases stay staircases
+    data, _ = steps
+    stepped = choose(data)
+    assert stepped.plateaus is not None and plateau_flatness(stepped.plateaus) < 0.1
+    assert not is_step_run(None) and not is_step_run(p.iloc[:2])
+
+
+def test_the_strain_run_is_still_a_load_step_run():
+    from pathlib import Path
+    from sms_analysis import load_sms_csv
+    from sms_analysis.auto import choose
+    from sms_analysis.steps import plateau_flatness
+    strain = choose(load_sms_csv(Path(__file__).resolve().parents[1] / "data" / "strain.csv"))
+    assert strain.plateaus is not None and len(strain.plateaus) == 17
+    assert plateau_flatness(strain.plateaus) < 0.05

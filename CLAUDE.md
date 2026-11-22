@@ -263,6 +263,39 @@ It is a continuous cooldown — no setpoint steps.
   `smooth_series` and by `steps.detect_plateaus` (plateau tables on the strain run identical for all
   20 fringes). The legacy trackers keep `medfilt` (exact reproduction of the Colab code). Tests
   `tests/test_smoothing.py`. The advisor's file is not in the repo.
+  Follow-up, 2026-11-19 23:10: the advisor wrote that the 10000-point simulation showed the repeat and
+  a 1000-point one "worked". Checked 2026-11-22 with the old filter put back: both samplings repeat
+  the first three values on the same 13 of 36 fringes, with the new filter neither does — the fix went
+  live at 23:05, five minutes before his mail. Sampling was not the cause.
+  2026-11-22 (the advisor: "can you analyze the attached data? I see some unusual behavior" —
+  `sms-temp-2026-11-19-fl.csv` in the owner's Downloads, NOT in the repo: 1409 spectra, 1475–1575 nm
+  at 0.1 nm, one per 33 s, a 13 h cooldown 90.2 → 17.6 °C, 16 extrema, noise 0.0009). Found in the app
+  and fixed: (1) the first look called it a **load-step run** (condition "Mass", 0 / 50 g, "No fringe
+  passes the R² threshold"): at 1 °C per spectrum the fringes move more than the jump threshold
+  between spectra, `detect_plateaus` cut two short pieces off the start and the other 1389 spectra (a
+  12 nm drift) became the third, "loaded" plateau → `steps.plateau_flatness` (frame-weighted std inside
+  the plateaus / median jump between them: 0.015–0.08 on the strain run, ≥ 0.13 on every ramp, 0.24–5
+  here) and `steps.is_step_run` (≥ 3 plateaus, one loaded, flatness ≤ `STEP_FLATNESS` = 0.1) replace
+  the old rule in the app's probe, `_plateaus_of` and `auto.choose`; simulated ramps
+  (`simulate_run(n_frames=40, common_rad=8π)`) fooled the old rule too. Now: continuous run, width fit
+  (standard lock is poor: 57 %), temperature from the file, 8 / 16 fringes locked. (2) The FindPeak tab's
+  automatic range for a fringe that moves 33 nm holds several dips, FindPeak returns the first and the
+  curve hops (44 jumps, a meaningless +53 pm/°C) → a warning when the range is wider than one fringe
+  period and the result hops. Tests `test_steps.py::test_a_fast_ramp_is_not_a_load_step_run`,
+  `test_app.py::test_a_fast_temperature_ramp_is_a_continuous_run`.
+  In the data (figures in `advisor_runs/2026-11-19/`, git-ignored, made by scratchpad scripts):
+  (a) fringes on both sides run 15–33 nm towards λc (1525.5 → 1524.4 nm) and merge there in pairs;
+  the signal at λc turns at 72.8, 56.3, 39.2 °C (π of phase per ≈ 17 °C); 7 fringes stay tracked all
+  the way. (b) Above ≈ 28 °C every fringe obeys one law: (λ − λc)² is linear in T (slope constant
+  within ± 7 % from 85 to 28 °C — a parabolic phase whose height changes linearly with T). (c) **A
+  kink at 25.3 °C** (spectrum 681, 6.34 h): all seven fringes break at 25.15–25.55 °C into two straight
+  lines (residual 6–18 pm), slope below = 0.43–0.67 of the slope above (peak@1570: +264 → +176 pm/°C);
+  the temperature column is smooth there, the fringe velocity drops within minutes; a first-order
+  thermometer lag does not explain it (residual 118 → 101 pm only); the 2024-10-17 cooldown has no kink
+  in the same range. Cause unknown from the data (mount / coating / an event at that time) — the
+  advisor's to say. (d) The temperature column scatters ± 0.5 °C over the first 13 readings and jumps
+  +3.0 °C at spectrum 13 with no change in the spectrum; analysis starts at spectrum 21.
+  Standard-tracker lock is poor at the start because 1 °C per spectrum moves fringes up to ~0.9 nm.
 - `sms_analysis/analysis.py` — `fit_sensitivity` (linregress λ vs T), `fit_calibration(track, degree)`
   (polynomial λ(T) → `CalibrationFit` with `predict`, `sensitivity(T)` = local slope, `residuals`),
   `curvature_test` (linear vs quadratic → `CurvatureTest`: RMSE improvement, curvature in pm/°C²,

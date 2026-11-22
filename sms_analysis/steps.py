@@ -134,6 +134,42 @@ def classify_plateaus(plateaus: pd.DataFrame, tol: float | None = None) -> np.nd
     return loaded
 
 
+STEP_FLATNESS = 0.1
+
+
+def plateau_flatness(plateaus: pd.DataFrame) -> float:
+    """How much the track wanders inside its plateaus, against the jumps between them:
+    frame-weighted standard deviation within the plateaus / median |jump| between neighbours.
+
+    A staircase is flat between its jumps: 0.015-0.08 on the strain run's fringes. A continuous
+    ramp cut into "plateaus" where it moves fastest is not: the pieces drift by nanometres, and
+    the ratio is 0.13 or more on every ramp tried (0.24-5 on the 90 -> 18 degC cooldown of
+    2026-11-19, 0.26-0.48 on simulated ramps). NaN with fewer than two plateaus."""
+    if len(plateaus) < 2:
+        return float("nan")
+    n = plateaus["n"].to_numpy(float)
+    spread = np.nan_to_num(plateaus["std"].to_numpy(float))
+    jumps = np.abs(np.diff(plateaus["mean"].to_numpy(float)))
+    typical = float(np.median(jumps))
+    if not n.sum() or typical <= 0:
+        return float("nan")
+    return float((n * spread).sum() / n.sum() / typical)
+
+
+def is_step_run(plateaus: pd.DataFrame | None, flatness: float = STEP_FLATNESS) -> bool:
+    """True when a track's plateaus make a load-step run: at least three of them, at least one
+    off the baseline, and flat (``plateau_flatness`` <= ``flatness``).
+
+    The flatness is what tells a staircase from a fast ramp. Without it a cooldown that starts at
+    1 degC per spectrum was read as a load-step run (2026-11-19: the fringe moved more than the
+    jump threshold from one spectrum to the next at the start, which split off two short
+    "plateaus", and the remaining 1389 spectra — a 12 nm drift — became the third, "loaded" one;
+    the app then asked for masses and fitted the fringes against 0 and 50 g)."""
+    if plateaus is None or len(plateaus) < 3 or not classify_plateaus(plateaus).any():
+        return False
+    return bool(plateau_flatness(plateaus) <= flatness)
+
+
 def default_step_values(plateaus: pd.DataFrame, start: float = 50.0, increment: float = 50.0,
                         baseline: float = 0.0) -> np.ndarray:
     """Guess one value per plateau: baseline plateaus get ``baseline``, the loaded ones
