@@ -7,3 +7,4 @@ streamlit>=1.44
 imageio-ffmpeg>=0.4.9    # ships an ffmpeg binary: MP4 movie export without a system install
 # touched 2026-10-17 to force a full redeploy (cloud process kept the old sms_analysis module)
 # rebuild marker 2026-10-29: Streamlit Cloud kept the old sms_analysis.phase in memory (window_clearance)
+# rebuild marker 2026-11-22: sms_analysis.steps gained is_step_run (Streamlit Cloud keeps old modules in memory)
