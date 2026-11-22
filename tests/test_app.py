@@ -302,3 +302,39 @@ def test_a_fast_temperature_ramp_is_a_continuous_run(tmp_path):
     assert status and status[0].startswith("**Continuous run**") and "**Temperature** from the file" in status[0]
     kind = [c for c in at.checkbox if c.label.startswith("Load-step run")]
     assert kind and not kind[0].value
+
+
+def test_phase_pairs_can_be_compared_and_the_fit_settings_changed():
+    """2026-11-22, the advisor through the owner: several wavelength pairs on one graph, the effect
+    of the curve fit on each, and the fit's settings open to change."""
+    at = AppTest.from_file(APP, default_timeout=600).run()
+    at.toggle(key="phase_compute").set_value(True).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert not at.warning                                            # the published settings to start with
+    assert not any("phase from" in d.value.columns for d in at.dataframe)      # the comparison runs on request
+    at.toggle(key="phase_cmp_on").set_value(True).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    table = [d.value for d in at.dataframe if "phase from" in d.value.columns][0]
+    assert set(table["phase from"]) == {"cubic only", "local fit"} and table["pair (nm)"].nunique() >= 3
+    paper = table[(table["pair (nm)"] == "1545/1570") & (table["phase from"] == "local fit")].iloc[0]
+    assert paper["gain (×)"] > 3 and paper["refined (%)"] == 100
+    assert any("Finest resolution" in m.value for m in at.markdown)
+    draw = [r for r in at.radio if r.key and r.key.startswith("phase_cmp_draw")][0]
+    draw.set_value(draw.options[3]).run()                            # deviation from the straight line
+    assert not at.exception, [str(e.value) for e in at.exception]
+    [r for r in at.radio if r.key and r.key.startswith("phase_cmp_x")][0].set_value("Time").run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    # another spectrum over the first one's profile
+    [c for c in at.checkbox if c.key and c.key.startswith("phase_prof_cmp")][0].set_value(True).run()
+    assert any("the profile moved by" in c.value for c in at.caption)
+    # a fit setting changed: the tab says so, and one button brings the published method back
+    at.selectbox(key="phase_order").set_value(1).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("Not the published method" in w.value for w in at.warning)
+    at.button(key="phase_reset").click().run()
+    assert not at.warning and at.session_state["phase_order"] == 3
+    assert any(b.key == "phase_study_run" for b in at.button)        # the settings study is offered
+    # FindPeak: FringeLab's tracker drawn over Igor's FindPeak
+    [c for c in at.checkbox if c.key and c.key.startswith("fp_") and c.key.endswith("_cmp")][0].set_value(True).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("FringeLab − FindPeak" in c.value for c in at.caption)

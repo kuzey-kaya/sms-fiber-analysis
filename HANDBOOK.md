@@ -189,6 +189,20 @@ GitHub's free monthly allowance is limited.
   extrema alone, and with the manuscript's local two-mode fit — with their
   scatter, resolution and, for a load run, the wobble on the plateaus; the
   toggle *Local two-mode fit (PTL)* switches the whole tab between the two.
+- **Comparing wavelength pairs:** further down the Phase tab, *Compare wavelength
+  pairs* has a small table — one row per pair, edit it like a spreadsheet — and
+  the switch *Compare these pairs*. The graph can show the readouts as measured,
+  as the change from the first spectrum, scaled to their own span, or as the
+  deviation from their straight line, against the condition or time, with the
+  cubic alone, the local fit, or both; the table and the bar chart under it say
+  which pair resolves best and what the local fit gained on each.
+  *Curve-fit settings* (top of the tab) changes how the two fits are done — the
+  tab says so in a yellow box while they differ from the published method, and
+  one button puts them back. *Look inside the local fit* shows the fit on one
+  spectrum; *What do the curve-fit settings change?* tries every setting in turn
+  (about a minute) and shows which ones move the result.
+- **FindPeak against FringeLab's tracker:** on the FindPeak tab the checkbox
+  *Compare with FringeLab's tracker on the same fringe* draws both on one graph.
 - **One or several fringes:** on the Fringe tracking tab, *Fringes in detail* shows
   one fringe Igor-style or up to 10 fringes together.
 - **A fringe that flickers** (jumps back and forth between two samples because its

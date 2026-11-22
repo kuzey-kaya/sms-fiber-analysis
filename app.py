@@ -41,9 +41,11 @@ from sms_analysis.peaks import smooth
 from sms_analysis.tracking import flicker_fraction, refine_width_fit
 from sms_analysis.io import SpectraSet
 from sms_analysis.movie import frame_rows, render_movie, render_phase_movie, video_formats
-from sms_analysis.phase import (EDGE_CLEARANCE, PAPER_LAMBDA_A, PAPER_LAMBDA_B, local_fit, phase_fits, phase_sensitivity,
-                                window_clearance,
-                                phase_series, scan_pairs, tracked_phase_change)
+from sms_analysis.phase import (EDGE_CLEARANCE, LOCAL_CYCLES, LOCAL_ORDER, PAPER_LAMBDA_A, PAPER_LAMBDA_B, local_fit,
+                                phase_fits, phase_sensitivity, window_clearance,
+                                phase_series, scan_pairs, tracked_phase_change, wavelength_phase)
+from sms_analysis.phase_compare import (VARIANTS, compare_pairs, default_pairs, deviation, pair_label, parameter_study,
+                                        plateau_groups, study_spread, study_summary)
 from sms_analysis.steps import (classify_plateaus, default_step_values, detect_plateaus, is_step_run,
                                 robust_jitter, step_condition)
 
@@ -284,9 +286,23 @@ def track_all(_data: SpectraSet, data_key: str, prominence: float, distance: int
 
 @st.cache_data(show_spinner="Local two-mode fits around λa and λb…")
 def phase_series_cached(_data: SpectraSet, _fits, data_key: str, prominence: float, distance: int,
-                        smooth_window: int, la: float, lb: float, local: bool):
-    # _fits come from phase_fits_cached with the same (data_key, prominence, distance, smooth_window)
-    return phase_series(_data, la, lb, fits=_fits, local=local, smooth_window=smooth_window)
+                        smooth_window: int, la: float, lb: float, local: bool, degree: int = 3,
+                        skip_inner: int = 0, cycles: float = LOCAL_CYCLES, order: int = LOCAL_ORDER,
+                        fit_powers: bool = True, envelope: bool = False):
+    # _fits come from phase_fits_cached with the same (data_key, prominence, distance, smooth_window,
+    # degree, skip_inner): those arguments are here only to key the cache
+    return phase_series(_data, la, lb, fits=_fits, local=local, smooth_window=smooth_window,
+                        cycles=cycles, order=order, fit_powers=fit_powers, envelope=envelope)
+
+
+@st.cache_data(show_spinner=False)
+def wavelength_phase_cached(_data: SpectraSet, _fits, data_key: str, prominence: float, distance: int,
+                            smooth_window: int, degree: int, skip_inner: int, lam: float, cycles: float,
+                            order: int, fit_powers: bool, envelope: bool):
+    # one wavelength at a time: N wavelengths give every pair among them, and a wavelength shared
+    # by two pairs (or by two visits to the tab) is fitted once
+    return wavelength_phase(_data, _fits, lam, True, cycles, order, fit_powers, smooth_window,
+                            envelope=envelope)
 
 
 def _resid_std(series, col):
@@ -300,14 +316,22 @@ def _resid_std(series, col):
 
 @st.cache_data(show_spinner="Fitting the phase profile of every spectrum…")
 def phase_fits_cached(_data: SpectraSet, data_key: str, prominence: float, distance: int,
-                      smooth_window: int):
-    return phase_fits(_data, prominence=prominence, distance=distance, smooth_window=smooth_window)
+                      smooth_window: int, degree: int = 3, skip_inner: int = 0):
+    return phase_fits(_data, prominence=prominence, distance=distance, smooth_window=smooth_window,
+                      degree=degree, skip_inner=skip_inner)
 
 
-def phase_profile_figure(data, fit):
-    """First spectrum with numbered extrema, and their phases with the cubic fit."""
+def profile_name(fit) -> str:
+    """"cubic" for the paper's fit, "degree-n polynomial" otherwise."""
+    degree = len(fit.coefficients) - 1
+    return {2: "parabola", 3: "cubic"}.get(degree, f"degree-{degree} polynomial")
+
+
+def phase_profile_figure(data, fit, other=None):
+    """First spectrum with numbered extrema, and their phases with the cubic fit. ``other`` =
+    (row, fit of that row) overlays a second spectrum and its profile for comparison."""
     fig = make_subplots(rows=1, cols=2, subplot_titles=("Extrema numbered outward from λc",
-                                                        "Δφ(λ±n) = −(n−1)π and the cubic fit"))
+                                                        f"Δφ(λ±n) = −(n−1)π and the {profile_name(fit)} fit"))
     fig.add_trace(go.Scatter(x=data.wavelengths, y=data.spectra[0], mode="lines", name="first spectrum",
                              line=dict(color=PEAK_COLOR, width=1.4), hoverinfo="skip"), row=1, col=1)
     y0 = np.interp(fit.wavelengths, data.wavelengths, data.spectra[0])
@@ -326,9 +350,24 @@ def phase_profile_figure(data, fit):
                              marker=dict(symbol="circle-open", size=8, color=PEAK_COLOR),
                              text=[l for l, k in zip(labels, ok) if k],
                              hovertemplate="%{text}: %{y:.2f} rad<extra></extra>"), row=1, col=2)
-    fig.add_trace(go.Scatter(x=xs, y=fit.phase(xs), mode="lines", name=f"cubic, RMS {fit.rms:.3f} rad",
+    fig.add_trace(go.Scatter(x=xs, y=fit.phase(xs), mode="lines", name=f"{profile_name(fit)}, RMS {fit.rms:.3f} rad",
                              line=dict(color=QUAD_COLOR, width=2), hoverinfo="skip"), row=1, col=2)
     fig.add_vline(x=fit.lambda_c, line_dash="dash", line_color="#999999", row=1, col=2)
+    if other is not None and other[1] is not None:
+        row_o, fit_o = other
+        col_o = "#E69F00"
+        fig.add_trace(go.Scatter(x=data.wavelengths, y=data.spectra[row_o], mode="lines",
+                                 name=f"spectrum {row_o + 1}", line=dict(color=col_o, width=1.2),
+                                 hoverinfo="skip"), row=1, col=1)
+        ok_o = np.isfinite(fit_o.phases)
+        fig.add_trace(go.Scatter(x=fit_o.wavelengths[ok_o], y=fit_o.phases[ok_o], mode="markers",
+                                 name=f"assigned phase, spectrum {row_o + 1}",
+                                 marker=dict(symbol="diamond-open", size=7, color=col_o)), row=1, col=2)
+        fig.add_trace(go.Scatter(x=xs, y=fit_o.phase(xs), mode="lines",
+                                 name=f"{profile_name(fit_o)}, spectrum {row_o + 1}, RMS {fit_o.rms:.3f} rad",
+                                 line=dict(color=col_o, width=2, dash="dash"), hoverinfo="skip"), row=1, col=2)
+        if np.isfinite(fit_o.lambda_c):
+            fig.add_vline(x=fit_o.lambda_c, line_dash="dot", line_color=col_o, row=1, col=2)
     fig.update_xaxes(title_text="Wavelength (nm)")
     fig.update_yaxes(title_text="Transmittance", row=1, col=1)
     fig.update_yaxes(title_text="Δφ (rad)", row=1, col=2)
@@ -442,6 +481,244 @@ def phase_readout_figure(series, sens, la, lb, has_cond, cond_title):
     fig.update_layout(height=760 if has_cond else 420, margin=dict(l=10, r=10, t=40, b=10),
                       legend=dict(orientation="h", y=-0.12, x=0))
     return fig
+
+
+PAIR_DRAW = ["Readout (rad)", "Change from the first frame (rad)", "Scaled to its own span (0 → 1)",
+             "Deviation from its straight line (mrad)"]
+PAIR_METHODS = ["Local fit", "Cubic only", "Both (cubic dashed)"]
+
+
+def clean_pairs(table, wl_min: float, wl_max: float, limit: int = 6) -> list[tuple[float, float]]:
+    """The pairs typed into the editor: complete rows only, inside the band, a < b, no repeats."""
+    out = []
+    for a, b in zip(pd.to_numeric(table.iloc[:, 0], errors="coerce"), pd.to_numeric(table.iloc[:, 1], errors="coerce")):
+        if not (np.isfinite(a) and np.isfinite(b)) or a == b:
+            continue
+        a, b = sorted((float(np.clip(a, wl_min, wl_max)), float(np.clip(b, wl_min, wl_max))))
+        if a != b and (a, b) not in out:
+            out.append((a, b))
+    return out[:limit]
+
+
+def default_compare_pairs(la, lb, lam_c, wl_min, wl_max, scan=None) -> pd.DataFrame:
+    """The pairs the comparison starts with (``phase_compare.default_pairs``) as the editor's table."""
+    return pd.DataFrame(default_pairs(la, lb, lam_c, wl_min, wl_max, scan), columns=["a (nm)", "b (nm)"])
+
+
+def _pair_curve(y, cond, draw):
+    """One readout in the units of the chosen drawing mode."""
+    y = np.asarray(y, float)
+    if draw == PAIR_DRAW[1]:
+        ok = np.isfinite(y)
+        return y - y[ok][0] if ok.any() else y
+    if draw == PAIR_DRAW[3]:
+        return deviation(y, cond) * 1e3
+    if draw == PAIR_DRAW[2]:
+        ok = np.isfinite(y) & np.isfinite(cond)
+        if ok.sum() >= 3 and np.ptp(cond[ok]):
+            k = np.polyfit(cond[ok], y[ok], 1)
+            lo, hi = np.polyval(k, cond[ok].min()), np.polyval(k, cond[ok].max())
+            return (y - lo) / (hi - lo) if hi != lo else np.full_like(y, np.nan)
+        ok = np.isfinite(y)
+        return (y - np.nanmin(y)) / np.ptp(y[ok]) if ok.any() and np.ptp(y[ok]) else y
+    return y
+
+
+def pairs_compare_figure(readouts, draw, against_cond, method, cond_title, smooth=None):
+    """Several pairs on one graph. ``draw`` is one of PAIR_DRAW, ``method`` one of PAIR_METHODS;
+    against the condition the frames are points (with the mean per condition value when the
+    condition has few values — a load run), against time they are lines (``smooth`` is applied to
+    them: the sidebar's *Smooth the drawn lines*)."""
+    fig = go.Figure()
+    cols = {"Local fit": ["local"], "Cubic only": ["cubic"]}.get(method, ["cubic", "local"])
+    for i, (label, r) in enumerate(readouts.items()):
+        color = FRINGE_PALETTE[i % len(FRINGE_PALETTE)]
+        cond = r["condition"].to_numpy(float)
+        for col in cols:
+            faint = len(cols) == 2 and col == "cubic"
+            y = _pair_curve(r[col], cond, draw)
+            name = f"{label} nm · {'cubic' if col == 'cubic' else 'local fit'}"
+            if not against_cond:
+                yd = smooth(y) if smooth is not None else y
+                fig.add_trace(go.Scatter(x=r["time"], y=yd, mode="lines", name=name, legendgroup=label,
+                                         line=dict(color=color, width=1.1 if faint else 1.6,
+                                                   dash="dash" if faint else "solid"),
+                                         opacity=0.55 if faint else 1.0))
+                continue
+            ok = np.isfinite(y) & np.isfinite(cond)
+            few = len(np.unique(cond[ok])) <= 40
+            fig.add_trace(go.Scatter(x=cond[ok], y=y[ok], mode="markers", name=name, legendgroup=label,
+                                     marker=dict(size=4, color=color, symbol="circle-open" if faint else "circle",
+                                                 opacity=(0.2 if few else 0.55) * (0.6 if faint else 1.0)),
+                                     showlegend=not few))
+            if few and ok.any():
+                g = pd.DataFrame({"x": cond[ok], "y": y[ok]}).groupby("x")["y"].agg(["mean", "std"]).reset_index()
+                fig.add_trace(go.Scatter(x=g["x"], y=g["mean"], mode="lines+markers", name=name, legendgroup=label,
+                                         error_y=dict(type="data", array=g["std"].fillna(0.0), width=2, thickness=1),
+                                         line=dict(color=color, width=1.4, dash="dash" if faint else "solid"),
+                                         marker=dict(size=8, color=color, symbol="circle-open" if faint else "circle"),
+                                         opacity=0.6 if faint else 1.0))
+    if draw == PAIR_DRAW[3]:
+        fig.add_hline(y=0, line_color="#888888", line_width=1)
+    if draw == PAIR_DRAW[2] and against_cond:
+        xs = [v for r in readouts.values() for v in r["condition"].to_numpy(float) if np.isfinite(v)]
+        if xs:
+            fig.add_trace(go.Scatter(x=[min(xs), max(xs)], y=[0, 1], mode="lines", name="straight line",
+                                     line=dict(color="#888888", width=1, dash="dot")))
+    fig.update_xaxes(title_text=cond_title if against_cond else "Time (s)")
+    fig.update_yaxes(title_text=draw)
+    fig.update_layout(height=520, margin=dict(l=10, r=10, t=30, b=10),
+                      legend=dict(orientation="h", y=-0.18, x=0, itemsizing="constant"))
+    return fig
+
+
+def fit_effect_figure(metrics, unit):
+    """What the last step of the algorithm buys, pair by pair: scatter about the straight line
+    (left) and the resolution that follows from it (right), cubic only against the local fit."""
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("Scatter about the straight line",
+                                                        f"Resolution ({unit})" if unit else "Resolution"))
+    for method, color in (("cubic only", "#9a9a9a"), ("local fit", RED)):
+        part = metrics[metrics["method"] == method]
+        text = [f"{g:.1f}×" if np.isfinite(g) and r > 0 else ("not refined" if method == "local fit" else "")
+                for g, r in zip(part["gain"], part["refined_pct"].fillna(0))] if method == "local fit" else None
+        fig.add_trace(go.Bar(x=part["pair"], y=part["scatter"] * 1e3, name=method, marker_color=color,
+                             text=text, textposition="outside", legendgroup=method), row=1, col=1)
+        fig.add_trace(go.Bar(x=part["pair"], y=part["resolution"], name=method, marker_color=color,
+                             legendgroup=method, showlegend=False), row=1, col=2)
+    fig.update_yaxes(title_text="Scatter (mrad)", row=1, col=1)
+    fig.update_yaxes(title_text=f"Resolution ({unit})" if unit else "Resolution", row=1, col=2)
+    fig.update_xaxes(title_text="Wavelength pair (nm)", type="category")
+    fig.update_layout(barmode="group", height=400, margin=dict(l=10, r=10, t=40, b=10),
+                      legend=dict(orientation="h", y=-0.25, x=0))
+    return fig
+
+
+def study_figure(study):
+    """The settings study at a glance (local-fit readout): how far each setting moves the slope
+    (left, % of the default slope) and what it does to the scatter (right, ratio to the default,
+    log axis), one colour per pair."""
+    loc = study[study["method"] == "local fit"]
+    order = list(dict.fromkeys(loc["variant"]))[::-1]
+    fig = make_subplots(rows=1, cols=2, shared_yaxes=True, horizontal_spacing=0.04,
+                        subplot_titles=("Slope against the default (%)", "Scatter against the default (×)"))
+    for i, (pair, part) in enumerate(loc.groupby("pair", sort=False)):
+        color = FRINGE_PALETTE[i % len(FRINGE_PALETTE)]
+        ok = part["refined_pct"] >= 50
+        for col, column, clip in ((1, "slope_change_pct", (-60, 60)), (2, "scatter_ratio", (0.2, 30))):
+            fig.add_trace(go.Scatter(
+                x=part[column].clip(*clip), y=part["variant"], mode="markers", name=f"{pair} nm",
+                legendgroup=pair, showlegend=col == 1,
+                marker=dict(size=10, color=color, symbol=["circle" if k else "x" for k in ok],
+                            line=dict(color="white", width=0.5)),
+                customdata=np.c_[part[column], part["refined_pct"]],
+                hovertemplate="%{y}<br>" + pair + " nm: %{customdata[0]:.2f} · refined on %{customdata[1]:.0f} % of frames<extra></extra>"),
+                row=1, col=col)
+    fig.add_vline(x=0, line_color="#888888", line_width=1, row=1, col=1)
+    fig.add_vline(x=1, line_color="#888888", line_width=1, row=1, col=2)
+    fig.update_xaxes(title_text="slope change (%), clipped at ±60", row=1, col=1)
+    fig.update_xaxes(title_text="scatter ratio (log), clipped at 0.2 … 30", type="log", row=1, col=2)
+    fig.update_yaxes(categoryorder="array", categoryarray=order)
+    fig.update_layout(height=120 + 26 * len(order), margin=dict(l=10, r=10, t=40, b=10),
+                      legend=dict(orientation="h", y=-0.12, x=0))
+    return fig
+
+
+def local_fit_figure(data, row, fits_ab):
+    """What the local fit does on one spectrum: around each wavelength the measured points, the
+    model the fit starts from (the profile's phase, t1 and t2 from the nearest maximum and minimum)
+    and the fitted model; below, what is left of the data after each."""
+    fig = make_subplots(rows=2, cols=2, shared_xaxes=True, row_heights=[0.68, 0.32], vertical_spacing=0.06,
+                        subplot_titles=[f"around {lam:g} nm" for lam, _ in fits_ab] + ["", ""])
+    wl, y = np.asarray(data.wavelengths, float), np.asarray(data.spectra[row], float)
+    for col, (lam, lf) in enumerate(fits_ab, 1):
+        first = col == 1
+        if lf is None:
+            near = np.abs(wl - lam) <= 6
+            fig.add_trace(go.Scatter(x=wl[near], y=y[near], mode="markers", name="measured", showlegend=first,
+                                     legendgroup="m", marker=dict(size=4, color=PEAK_COLOR)), row=1, col=col)
+            fig.add_annotation(text="no local fit here: the window would<br>reach λc or leave the band",
+                               x=lam, y=float(np.mean(y[near])) if near.any() else 0.5, showarrow=False,
+                               row=1, col=col)
+            continue
+        m = (wl >= lf.window[0]) & (wl <= lf.window[1])
+        xs = np.linspace(lf.window[0], lf.window[1], 400)
+        fig.add_trace(go.Scatter(x=wl[m], y=y[m], mode="markers", name="measured", showlegend=first, legendgroup="m",
+                                 marker=dict(size=4, color=PEAK_COLOR)), row=1, col=col)
+        fig.add_trace(go.Scatter(x=xs, y=lf.model(xs, start=True), mode="lines", name="start (from the profile)",
+                                 showlegend=first, legendgroup="s",
+                                 line=dict(color="#9a9a9a", width=1.4, dash="dash")), row=1, col=col)
+        fig.add_trace(go.Scatter(x=xs, y=lf.model(xs), mode="lines", name="fitted two-mode model",
+                                 showlegend=first, legendgroup="f", line=dict(color=RED, width=1.8)), row=1, col=col)
+        fig.add_vline(x=lam, line_dash="dot", line_color="#666666", row=1, col=col)
+        fig.add_trace(go.Scatter(x=wl[m], y=(y[m] - lf.model(wl[m], start=True)) * 1e3, mode="lines",
+                                 name="residual, start", showlegend=first, legendgroup="s",
+                                 line=dict(color="#9a9a9a", width=1.2, dash="dash")), row=2, col=col)
+        fig.add_trace(go.Scatter(x=wl[m], y=(y[m] - lf.model(wl[m])) * 1e3, mode="lines", name="residual, fitted",
+                                 showlegend=first, legendgroup="f", line=dict(color=RED, width=1.4)), row=2, col=col)
+        fig.update_xaxes(title_text="Wavelength (nm)", row=2, col=col)
+    fig.update_yaxes(title_text="Transmittance", row=1, col=1)
+    fig.update_yaxes(title_text="Residual (×10⁻³)", row=2, col=1)
+    fig.update_layout(height=520, margin=dict(l=10, r=10, t=40, b=10),
+                      legend=dict(orientation="h", y=-0.16, x=0))
+    return fig
+
+
+def local_fit_table(fits_ab) -> pd.DataFrame:
+    rows = []
+    for lam, lf in fits_ab:
+        if lf is None:
+            rows.append({"wavelength (nm)": lam, "status": "refused (window reaches λc or leaves the band)"})
+            continue
+        rows.append({"wavelength (nm)": lam, "status": "converged" if lf.converged else "not accepted (cubic kept)",
+                     "window (nm)": f"{lf.window[0]:.1f} – {lf.window[1]:.1f}", "points": lf.n_points,
+                     "t1": lf.t1, "t2": lf.t2, "visibility": lf.visibility,
+                     "φ from the profile (rad)": lf.phi_cubic, "φ fitted (rad)": lf.phi,
+                     "change (mrad)": (lf.phi - lf.phi_cubic) * 1e3,
+                     "RMS start (×10⁻³)": lf.rms_start * 1e3, "RMS fitted (×10⁻³)": lf.rms * 1e3})
+    return pd.DataFrame(rows)
+
+
+def pair_metrics_table(metrics, unit, with_plateaus) -> pd.DataFrame:
+    """The comparison's numbers in display units (mrad, % of span)."""
+    t = pd.DataFrame({
+        "pair (nm)": metrics["pair"], "phase from": metrics["method"],
+        f"slope (mrad/{unit})": metrics["slope"] * 1e3, "R²": metrics["r_squared"],
+        "span (rad)": metrics["span"], "scatter (mrad)": metrics["scatter"] * 1e3,
+        "bow (% of span)": metrics["bow_pct"], "noise (mrad)": metrics["noise"] * 1e3,
+        "frame to frame (mrad)": metrics["frame_noise"] * 1e3})
+    if with_plateaus:
+        t["on the plateaus (mrad)"] = metrics["plateau_noise"] * 1e3
+    t[f"resolution ({unit})"] = metrics["resolution"]
+    t["refined (%)"] = metrics["refined_pct"]
+    t["gain (×)"] = metrics["gain"]
+    return t
+
+
+def pair_summary(metrics, unit, cond_name) -> str:
+    """Two or three sentences on what the comparison shows."""
+    loc = metrics[(metrics["method"] == "local fit") & metrics["resolution"].notna()]
+    if loc.empty:
+        return ""
+    best = loc.loc[loc["resolution"].idxmin()]
+    out = [f"Finest resolution: **{best['pair']} nm** — {best['resolution']:.2g} {unit} "
+           f"({best['slope'] * 1e3:+.2f} mrad/{unit}, scatter {best['scatter'] * 1e3:.1f} mrad)."]
+    refined = loc[loc["refined_pct"] >= 50]
+    if len(refined):
+        g = refined["gain"]
+        out.append(f"Where the local fit applies ({', '.join(refined['pair'])}) it cuts the scatter about the line "
+                   + (f"{g.min():.1f}× to {g.max():.1f}×." if len(g) > 1 and g.max() - g.min() > 0.05 else f"{g.iloc[0]:.1f}×."))
+    kept = loc[loc["refined_pct"] < 50]
+    if len(kept):
+        one = len(kept) == 1
+        out.append(f"{', '.join(kept['pair'])} {'keeps' if one else 'keep'} the cubic's values: the window around "
+                   f"one of {'its' if one else 'their'} wavelengths would reach λc or leave the band, so the local "
+                   f"fit is refused there — {'this is the pair that deviates' if one else 'these are the pairs that deviate'} more.")
+    bow = loc.dropna(subset=["bow_pct"])
+    if len(bow) > 1:
+        hi, lo = bow.loc[bow["bow_pct"].idxmax()], bow.loc[bow["bow_pct"].idxmin()]
+        out.append(f"Most curved against {cond_name.lower()}: {hi['pair']} nm (the response bows by "
+                   f"{hi['bow_pct']:.1f} % of its span); straightest: {lo['pair']} nm ({lo['bow_pct']:.1f} %).")
+    return " ".join(out)
 
 
 def fringe_table(tracks: dict[str, pd.DataFrame], has_cond: bool) -> pd.DataFrame:
@@ -599,15 +876,20 @@ def shifts_figure(tracks, x_mode, cond_title):
     return fig
 
 
-def igor_figure(track, has_cond, cond_title, cursors=None, from_zero=False):
+def igor_figure(track, has_cond, cond_title, cursors=None, from_zero=False, compare=None, name="wavelength"):
     """Tracked wavelength (red, left) and condition (blue, right) vs time. ``cursors`` = (pntA, pntB):
     Igor's round (A) and square (B) cursors drawn on the wavelength trace. ``from_zero``: the right
     axis starts at 0 like the advisor's ``SetAxis/A/E=1 right`` (autoscale including zero), which is
-    what makes a 22 °C thermometer trace with 0.3 °C wobbles look flat on his graphs."""
+    what makes a 22 °C thermometer trace with 0.3 °C wobbles look flat on his graphs. ``compare`` =
+    (name, wavelengths per frame): a second position of the same fringe on the left axis (dark,
+    thin) — another method on the same frames."""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Scatter(x=track["time"], y=track["wavelength"], mode="lines",
-                             name="wavelength", line=dict(color=RED, width=1.6),
+                             name=name, line=dict(color=RED, width=1.6),
                              connectgaps=False), secondary_y=False)
+    if compare is not None:
+        fig.add_trace(go.Scatter(x=track["time"], y=compare[1], mode="lines", name=compare[0],
+                                 line=dict(color="#222222", width=1.1), connectgaps=False), secondary_y=False)
     if has_cond:
         fig.add_trace(go.Scatter(x=track["time"], y=track["temperature"].ffill().bfill(), mode="lines",
                                  name=cond_title, line=dict(color=BLUE, width=1.6)),
@@ -631,7 +913,8 @@ def igor_figure(track, has_cond, cond_title, cursors=None, from_zero=False):
                 fig.add_vline(x=t[pnt], line_color="#888888", line_dash="dot", line_width=1)
     fig.update_yaxes(title_text="Peak Wavelength (nm)", color=RED, secondary_y=False)
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title="Time, seconds", showlegend=False)
+                      xaxis_title="Time, seconds", showlegend=compare is not None,
+                      legend=dict(orientation="h", y=1.08, x=0))
     return fig
 
 
@@ -2057,7 +2340,21 @@ with tab_igor:
                                      "temperature with 0.3 °C wobbles then draws as a flat line. Off = the "
                                      "axis fits the data range and shows the wobbles.")
     cur_fp = cursor_panel(igor_fp, f"{fk}_cur", igor_title_fp, _plat)
-    show_figure(igor_figure(igor_fp, has_cond, igor_title_fp, cursors=cur_fp, from_zero=zero_fp), "findpeak")
+    # the same fringe as FringeLab's own tracker sees it: text below, and drawn over the graph on request
+    near = [k for k in table["fringe"] if min(a_fp, b_fp) <= float(k.split("@")[1]) <= max(a_fp, b_fp)
+            and k.startswith("dip" if neg else "peak")]
+    cmp_fp = None
+    if near and st.checkbox(f"Compare with FringeLab's tracker on the same fringe ({near[0]})", key=f"{fk}_cmp",
+                            help="Draws the position FringeLab's own tracker gives for this fringe over "
+                                 "Igor's FindPeak, on the same frames and with the same line smoothing."):
+        cmp_fp = ("FringeLab tracker", smooth_series(tracks[near[0]]["wavelength"].to_numpy(float),
+                                                     smooth_frames, smooth_flatten, _plat))
+        gap_fp = tracks[near[0]]["wavelength"].to_numpy(float) - w_fp
+        if np.isfinite(gap_fp).sum() > 3:
+            st.caption(f"FringeLab − FindPeak on the frames both found: mean {np.nanmean(gap_fp) * 1e3:+.0f} pm, "
+                       f"spread ± {np.nanstd(gap_fp) * 1e3:.0f} pm.")
+    show_figure(igor_figure(igor_fp, has_cond, igor_title_fp, cursors=cur_fp, from_zero=zero_fp, compare=cmp_fp,
+                            name="FindPeak (V_PeakLoc)"), "findpeak")
     st.caption(f"Igor's graph: V_PeakLoc (red, left) and {igor_title_fp} (blue, right) against time; "
                f"lines drawn {_drawn}. A frame whose range holds no such extremum is a gap — widen the "
                "range or move it when that happens, as in Igor.")
@@ -2071,8 +2368,6 @@ with tab_igor:
                    + f"; the dashed line is the straight fit of the tiles above"
                    + (" (the frames recorded while the load was being changed are left out)." if _plat is not None else "."))
     # the same fringe with FringeLab's tracker, for the record
-    near = [k for k in table["fringe"] if min(a_fp, b_fp) <= float(k.split("@")[1]) <= max(a_fp, b_fp)
-            and k.startswith("dip" if neg else "peak")]
     if near:
         k = near[0]
         w_fl = tracks[k]["wavelength"].to_numpy(float)
@@ -2221,7 +2516,54 @@ with tab_phase:
         st.caption("Turn on *Compute the phase readout* to run the SM1E.2 analysis on this file.")
         fit0_p = None
     else:
-        fits_p = phase_fits_cached(data, data_key, prominence, distance, smooth_window)
+        PHASE_DEFAULTS = dict(phase_degree=3, phase_skip_inner=False, phase_cycles=float(LOCAL_CYCLES),
+                              phase_order=int(LOCAL_ORDER), phase_powers=True, phase_envelope=False)
+        for _k, _v in PHASE_DEFAULTS.items():
+            st.session_state.setdefault(_k, _v)
+        with st.expander("Curve-fit settings · the defaults are the published method", icon=":material/tune:"):
+            st.caption("Two fits make the readout. First a polynomial through the numbered extrema gives the "
+                       "phase profile Δφ(λ) of the whole spectrum (the SM1E.2 paper: a cubic). Then, around "
+                       "each of the two wavelengths, the two-mode model T = t1² + t2² + 2 t1 t2 cos φ(λ) is "
+                       "fitted to the measured points, starting from that profile (the PTL manuscript). "
+                       "Everything on this tab follows these settings; the settings study further down runs "
+                       "them one at a time and shows what each one changes.")
+            fc = st.columns(3)
+            p_degree = fc[0].selectbox(
+                "Polynomial through the extrema", [2, 3, 4, 5], key="phase_degree",
+                format_func=lambda d: {2: "parabola (degree 2)", 3: "cubic (the paper)", 4: "degree 4", 5: "degree 5"}[d])
+            p_skip = int(fc[0].checkbox("Leave the λ±1 pair out of that fit", key="phase_skip_inner",
+                                        help="The two extrema next to λc are the broadest, so their position "
+                                             "is known worst."))
+            p_cycles = float(fc[1].select_slider(
+                "Local-fit window (fringe cycles)", [1.0, 1.5, 2.0, 3.0, 4.0], key="phase_cycles",
+                help="Width of the piece of spectrum fitted around each wavelength, in local fringe "
+                     "periods. The paper asks for at least one."))
+            p_order = int(fc[1].selectbox(
+                "Phase terms free in the local fit", [0, 1, 2, 3], key="phase_order",
+                format_func=lambda k: ["the phase only", "phase + slope (fringe period)", "phase + slope + chirp",
+                                       "all four (the paper)"][k],
+                help="The others stay at the profile's values."))
+            p_powers = bool(fc[2].checkbox("Fit the mode powers t1, t2", key="phase_powers",
+                                           help="Off: t1 and t2 stay at their starting values from the nearest "
+                                                "maximum and minimum (Eq. 9)."))
+            p_env = bool(fc[2].checkbox("Let t1, t2 slope across the window", key="phase_envelope",
+                                        help="Two more parameters: the fringe envelope is allowed to tilt "
+                                             "with wavelength. Not in the paper."))
+
+            def _reset_phase_settings():
+                for _k, _v in PHASE_DEFAULTS.items():
+                    st.session_state[_k] = _v
+
+            fc[2].button("Back to the published settings", key="phase_reset", on_click=_reset_phase_settings)
+        fit_kw = dict(cycles=p_cycles, order=p_order, fit_powers=p_powers, envelope=p_env)
+        changed_p = [n_ for n_, k_ in (("the polynomial's degree", "phase_degree"), ("the λ±1 pair", "phase_skip_inner"),
+                                       ("the window width", "phase_cycles"), ("the free phase terms", "phase_order"),
+                                       ("the mode powers", "phase_powers"), ("the envelope slope", "phase_envelope"))
+                     if st.session_state[k_] != PHASE_DEFAULTS[k_]]
+        if changed_p:
+            st.warning("Not the published method: " + ", ".join(changed_p) + " changed in *Curve-fit settings*. "
+                       "The numbers on this tab follow those settings.", icon=":material/tune:")
+        fits_p = phase_fits_cached(data, data_key, prominence, distance, smooth_window, p_degree, p_skip)
         fit0_p = next((f for f in fits_p if f is not None), None)
     if not compute_phase:
         pass
@@ -2254,7 +2596,7 @@ with tab_phase:
         c[2].caption("The paper uses 1545 and 1570 nm; pick both on one side of λc. The pair scan below "
                      "shows which pair responds most to this run's condition.")
         ser = phase_series_cached(data, fits_p, data_key, prominence, distance, smooth_window,
-                                  float(la), float(lb), True)
+                                  float(la), float(lb), True, p_degree, p_skip, **fit_kw)
         if step_cond is not None:
             # pair the readout with the blanked step condition: the frames recorded while the load was
             # being changed must not enter the fit or the scatter (they would sit at the previous load)
@@ -2302,7 +2644,20 @@ with tab_phase:
         tiles += [("Mode powers t1, t2", f"{t1:.2f}, {t2:.2f}",
                    f"visibility {vis:.2f} · fit RMS {np.nanmedian(ser_local['rms_local']):.4f} (T)")]
         stat_strip(tiles)
-        show_figure(phase_profile_figure(data, fit0_p), "phase_profile")
+        pc = st.columns([1.3, 3])
+        other_p = None
+        if pc[0].checkbox("Overlay another spectrum", key=f"phase_prof_cmp_{data_key}",
+                          help="A second spectrum and its phase profile on the same graph: how the profile "
+                               "moved between the two is what the readout measures."):
+            row_o = pc[1].slider("Spectrum to overlay", 1, len(data), len(data), key=f"phase_prof_row_{data_key}") - 1
+            other_p = (row_o, fits_p[row_o])
+        show_figure(phase_profile_figure(data, fit0_p, other_p), "phase_profile")
+        if other_p is not None and other_p[1] is not None:
+            d_a, d_b = (float(other_p[1].phase(x_) - fit0_p.phase(x_)) for x_ in (la, lb))
+            st.caption(f"Between the first spectrum and spectrum {other_p[0] + 1} the profile moved by "
+                       f"{d_a:+.2f} rad at {la:g} nm and {d_b:+.2f} rad at {lb:g} nm (each relative to its own λ±1 "
+                       f"pair): the readout sees the difference, {d_b - d_a:+.2f} rad; λc went "
+                       f"{fit0_p.lambda_c:.1f} → {other_p[1].lambda_c:.1f} nm.")
         ser_d = ser.assign(phase_diff=smooth_series(ser["phase_diff"].to_numpy(float), smooth_frames,
                                                     smooth_flatten, _plat))
         st.caption(f"Readout drawn as {_drawn.replace('as tracked', 'fitted frame by frame')} "
@@ -2343,10 +2698,180 @@ with tab_phase:
                 else:
                     st.info("The local fit could not be applied on enough frames of this pair to compare "
                             "(a window that holds λc or leaves the band is refused); try a pair on one side of λc.")
+        grid = np.arange(np.ceil(wl_min / 5) * 5 + 5, wl_max - 4, 5.0)
+        cond_c = np.asarray(step_cond if step_cond is not None else data.temperature, float)
+        scan = scan_pairs(fits_p, cond_c, grid) if has_cond else pd.DataFrame()
+        groups_c = plateau_groups(len(data), _plat)
+        with st.expander("Compare wavelength pairs · same run, same frames", expanded=True,
+                         icon=":material/stacked_line_chart:"):
+            st.caption("One row per pair (λa, λb): change, add or delete rows, then switch the comparison on. "
+                       "Every wavelength is fitted once and shared by the pairs that use it. The pairs start "
+                       "as: the one in use above, the paper's, its mirror image on the other side of λc, a "
+                       "pair across λc and the one the cubic scan ranks best.")
+            init_key = f"phase_pairs_init_{data_key}"
+            if init_key not in st.session_state:
+                st.session_state[init_key] = default_compare_pairs(la, lb, fit0_p.lambda_c, wl_min, wl_max, scan)
+            cc = st.columns([1.1, 2.4])
+            edited_c = cc[0].data_editor(
+                st.session_state[init_key], num_rows="dynamic", hide_index=True, key=f"phase_pairs_{data_key}",
+                column_config={c_: st.column_config.NumberColumn(min_value=wl_min, max_value=wl_max, step=0.5,
+                                                                 format="%.1f") for c_ in ("a (nm)", "b (nm)")})
+            pairs_c = clean_pairs(edited_c, wl_min, wl_max)
+            compare_on = cc[1].toggle("Compare these pairs", key="phase_cmp_on",
+                                      help="Runs the local fit at every wavelength in the table on every "
+                                           "spectrum (about 2 s per wavelength the first time; kept afterwards).")
+            draw_c = cc[1].radio("Draw", PAIR_DRAW if has_cond else PAIR_DRAW[:2], index=1, key=f"phase_cmp_draw_{data_key}",
+                                 help="Readout: as measured. Change: every pair starts at 0. Scaled: each "
+                                      "pair's own straight line runs from 0 to 1, so pairs with different "
+                                      "slopes lie on top of each other and only their shape differs. Deviation: "
+                                      "what is left after taking each pair's straight line out.")
+            cx = cc[1].columns(2)
+            against_c = cx[0].radio("Against", ["Condition", "Time"] if has_cond else ["Time"], horizontal=True,
+                                    key=f"phase_cmp_x_{data_key}",
+                                    format_func=lambda v: cond_title if v == "Condition" else v)
+            method_c = cx[1].radio("Phase from", PAIR_METHODS, index=2, horizontal=True, key="phase_cmp_method")
+            if compare_on and not pairs_c:
+                st.info("Enter at least one pair: two different wavelengths inside the band.")
+            elif compare_on:
+                lams_c = sorted({l_ for pr in pairs_c for l_ in pr})
+                bar_c = st.progress(0.0, text="Local two-mode fits…")
+                phases_c = {}
+                for i_, lam_ in enumerate(lams_c):
+                    bar_c.progress(i_ / len(lams_c), text=f"Local two-mode fit at {lam_:g} nm ({i_ + 1}/{len(lams_c)})")
+                    phases_c[lam_] = wavelength_phase_cached(data, fits_p, data_key, prominence, distance,
+                                                            smooth_window, p_degree, p_skip, lam_, **fit_kw)
+                bar_c.empty()
+                readouts_c, metrics_c = compare_pairs(data, fits_p, pairs_c, cond_c, groups_c, phases=phases_c)
+                show_figure(pairs_compare_figure(
+                    readouts_c, draw_c, against_c == "Condition", method_c, cond_title,
+                    lambda y_: smooth_series(y_, smooth_frames, smooth_flatten, _plat)), "phase_pairs")
+                st.caption("One colour per pair. "
+                           + ("Every frame is a point: filled = with the local fit, open = the cubic alone"
+                              + ("; the large points joined by a line are the means per load, with their "
+                                 "spread as bars (solid = local fit, dashed = cubic)." if step_cond is not None else ".")
+                              if against_c == "Condition" else
+                              "Solid = with the local fit, dashed = the cubic alone. Lines drawn as "
+                              f"{_drawn.replace('as tracked', 'fitted frame by frame')}; the numbers below use every frame.")
+                           + " Click a name in the legend to hide that curve, double-click to keep only it.")
+                if has_cond:
+                    shown_c = pair_metrics_table(metrics_c, cond_unit, _plat is not None)
+                    st.dataframe(shown_c, hide_index=True, width="stretch", column_config={
+                        c_: st.column_config.NumberColumn(format="%.4f" if c_ == "R²" else "%.3g" if c_.startswith("resolution")
+                                                          else "%.0f" if c_.startswith("refined") else "%.2f")
+                        for c_ in shown_c.columns if c_ not in ("pair (nm)", "phase from")})
+                    st.caption("slope, R², scatter: the straight line of the readout against the condition. "
+                               "bow: the largest gap between the best parabola and that line, in % of the span — "
+                               "the smooth, repeatable part of the deviation. noise: what is left about the "
+                               "parabola — the part that is not repeatable. frame to frame: the jitter between "
+                               "neighbouring spectra. resolution = scatter ÷ slope. gain = cubic scatter ÷ "
+                               "local-fit scatter. refined: frames on which both local fits were accepted.")
+                    summary_c = pair_summary(metrics_c, cond_unit, cond_name)
+                    if summary_c:
+                        st.markdown(summary_c)
+                    show_figure(fit_effect_figure(metrics_c, cond_unit), "phase_fit_effect")
+                    st.caption("The effect of the curve fit, pair by pair: grey = the cubic through the extrema "
+                               "alone, red = after the local two-mode fit; the number over a red bar is how many "
+                               "times smaller the scatter became.")
+                    dl = st.columns(3)
+                    dl[0].download_button("Comparison table (CSV)", shown_c.to_csv(index=False),
+                                          f"{Path(file_name).stem}_phase_pairs.csv", "text/csv",
+                                          key="phase_pairs_csv", **NO_RERUN)
+        with st.expander("Look inside the local fit · one spectrum, both wavelengths", icon=":material/search:"):
+            row_i = st.slider("Spectrum", 1, len(data), 1, key=f"phase_inspect_{data_key}") - 1
+            fit_i = fits_p[row_i]
+            if fit_i is None:
+                st.info("The phase profile could not be fitted on this spectrum.")
+            else:
+                fits_ab = [(float(l_), local_fit(data.wavelengths, data.spectra[row_i], fit_i, float(l_),
+                                                 smooth_window=smooth_window, **fit_kw)) for l_ in (la, lb)]
+                show_figure(local_fit_figure(data, row_i, fits_ab), "phase_local_fit")
+                st.dataframe(local_fit_table(fits_ab), hide_index=True, width="stretch", column_config={
+                    c_: st.column_config.NumberColumn(format="%.3f") for c_ in
+                    ("t1", "t2", "visibility", "φ from the profile (rad)", "φ fitted (rad)")}
+                    | {c_: st.column_config.NumberColumn(format="%.1f") for c_ in
+                       ("change (mrad)", "RMS start (×10⁻³)", "RMS fitted (×10⁻³)")})
+                st.caption("Grey dashed: the two-mode model with the phase taken from the profile and t1, t2 from "
+                           "the nearest maximum and minimum — where the fit starts. Red: after the least-squares "
+                           "fit of the free parameters chosen in *Curve-fit settings*. The fitted phase at the "
+                           "dotted line is what enters the readout. A fit is not accepted when it ends worse than "
+                           "it started, leaves more than 0.05 in transmittance, or moves the phase by more than "
+                           "1 rad; the frame then keeps the profile's values for both wavelengths.")
+        if has_cond:
+            with st.expander("What do the curve-fit settings change? · one setting at a time", icon=":material/science:"):
+                study_pairs = pairs_c[:4] or [(float(min(la, lb)), float(max(la, lb)))]
+                rows_s = np.unique(np.linspace(0, len(data) - 1, min(len(data), 150)).astype(int))
+                n_lam_s = len({l_ for pr in study_pairs for l_ in pr})
+                st.markdown(
+                    f"Runs the readout of {', '.join(pair_label(*pr) for pr in study_pairs)} nm "
+                    f"(the first four pairs of the table above) {len(VARIANTS)} times on {len(rows_s)} spectra "
+                    "spread over the run: once with the published settings, then with one setting changed at a "
+                    "time — the polynomial's degree, the smoothing and prominence that find the extrema, the "
+                    "window of the local fit, which of its parameters are free. A setting that matters moves "
+                    "the slope or the scatter; one that does not leaves both where they were.")
+                sig_s = (tuple(study_pairs), prominence, distance, smooth_window, len(rows_s), cond_title,
+                         hashlib.md5(np.nan_to_num(cond_c, nan=-1e9).tobytes()).hexdigest()[:10])
+                study_key = f"phase_study_{data_key}"
+                if st.button(f"Run the settings study (about {max(10, int(8 + len(VARIANTS) * n_lam_s * len(rows_s) * 0.0026))} s)",
+                             key="phase_study_run"):
+                    bar_s = st.progress(0.0, text="Settings study…")
+                    study_new = parameter_study(
+                        data, study_pairs, cond_c, groups_c, rows=rows_s, prominence=prominence, distance=distance,
+                        smooth_window=smooth_window,
+                        progress=lambda i_, n_, name_: bar_s.progress(min(i_ / n_, 1.0), text=f"{name_} ({i_ + 1}/{n_})" if name_ else "Done"))
+                    bar_s.empty()
+                    st.session_state[study_key] = (sig_s, study_new)
+                stored_s = st.session_state.get(study_key)
+                if stored_s is not None:
+                    study = stored_s[1]
+                    if stored_s[0] != sig_s:
+                        st.caption("Made for other pairs or settings than the ones selected now — run it again to update.")
+                    spread_s = study_spread(study)
+                    if len(spread_s):
+                        st.markdown("**How far the slope moves across the settings that still work** — the "
+                                    "systematic part of its uncertainty:")
+                        st.dataframe(pd.DataFrame({
+                            "pair (nm)": spread_s["pair"],
+                            f"slope, published settings (mrad/{cond_unit})": spread_s["slope"] * 1e3,
+                            f"lowest (mrad/{cond_unit})": spread_s["slope_min"] * 1e3,
+                            f"highest (mrad/{cond_unit})": spread_s["slope_max"] * 1e3,
+                            "± across settings (%)": spread_s["spread_pct"],
+                            "settings counted": spread_s["n_settings"],
+                            "lowest with": spread_s["lowest_with"], "highest with": spread_s["highest_with"]}),
+                            hide_index=True, width="stretch",
+                            column_config={c_: st.column_config.NumberColumn(format="%.3f") for c_ in
+                                           (f"slope, published settings (mrad/{cond_unit})", f"lowest (mrad/{cond_unit})",
+                                            f"highest (mrad/{cond_unit})")}
+                            | {"± across settings (%)": st.column_config.NumberColumn(format="%.1f")})
+                        st.caption("A setting counts for a pair when both local fits are still accepted on ≥ 90 % "
+                                   "of the spectra and the scatter stays within 1.5× of the published settings'. "
+                                   "The fit's own ± (the tile at the top) is the statistical part; this is what "
+                                   "the choice of settings adds to it. A pair the local fit cannot refine with "
+                                   "the published settings is not listed.")
+                    show_figure(study_figure(study), "phase_study")
+                    st.caption("Local-fit readout. One point per pair and setting; a cross = the local fit was "
+                               "accepted on fewer than half of the spectra with that setting (the readout is then "
+                               "mostly the cubic's). Left of 1 on the right-hand panel = less scatter than the "
+                               "published settings.")
+                    summ_s = study_summary(study)
+                    st.dataframe(pd.DataFrame({
+                        "setting": summ_s["variant"], "changes": summ_s["where"],
+                        "largest slope change (%)": summ_s["slope_change_max_pct"],
+                        "scatter ×, best pair": summ_s["scatter_ratio_min"],
+                        "scatter ×, median": summ_s["scatter_ratio_median"],
+                        "scatter ×, worst pair": summ_s["scatter_ratio_max"],
+                        "refined (%)": summ_s["refined_pct"], "spectra fitted (%)": summ_s["fitted_pct"]}),
+                        hide_index=True, width="stretch",
+                        column_config={c_: st.column_config.NumberColumn(format="%.2f") for c_ in
+                                       ("scatter ×, best pair", "scatter ×, median", "scatter ×, worst pair")}
+                        | {c_: st.column_config.NumberColumn(format="%.1f") for c_ in
+                           ("largest slope change (%)", "refined (%)", "spectra fitted (%)")})
+                    st.download_button("Settings study, every pair and setting (CSV)", study.to_csv(index=False),
+                                       f"{Path(file_name).stem}_phase_settings_study.csv", "text/csv",
+                                       key="phase_study_csv", **NO_RERUN)
+                else:
+                    st.caption("Not run yet for this file.")
         if has_cond:
             with st.expander("Which wavelength pair works best for this run? · what the readout sees"):
-                grid = np.arange(np.ceil(wl_min / 5) * 5 + 5, wl_max - 4, 5.0)
-                scan = scan_pairs(fits_p, step_cond if step_cond is not None else data.temperature, grid)
                 if len(scan):
                     st.dataframe(scan.sort_values("resolution").head(10).rename(columns={
                         "lambda_a": "a (nm)", "lambda_b": "b (nm)", "slope": f"rad/{cond_unit}",

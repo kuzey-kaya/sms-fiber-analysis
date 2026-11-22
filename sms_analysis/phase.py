@@ -100,26 +100,38 @@ def _ordered_extrema(wavelengths, spectrum, prominence, distance, smooth_window,
     return wl[order], kind[order]
 
 
-def _fit_with_center(wl, kind, c, x0):
-    """Assign Δφ(λ±n) = −(n−1)π around extremum c and fit the cubic."""
+def _fit_with_center(wl, kind, c, x0, degree=3, skip_inner=0):
+    """Assign Δφ(λ±n) = −(n−1)π around extremum c and fit the polynomial (a cubic in the paper).
+
+    ``skip_inner`` leaves the first pairs next to λc (n ≤ skip_inner) out of the fit: they are the
+    broadest extrema, the ones whose position is known worst. They keep their assigned phase in
+    the returned arrays' *labelling* only through the caller."""
     n = np.abs(np.arange(len(wl)) - c)
     keep = n > 0                       # the λc extremum has no assigned phase
+    use = n > skip_inner
     phi = -(n[keep] - 1) * np.pi
     x = wl[keep] - x0
     if keep.sum() < 5 or (np.arange(len(wl)) < c).sum() < 2 or (np.arange(len(wl)) > c).sum() < 2:
         return None
-    coef = np.polyfit(x, phi, 3)
+    if use.sum() < degree + 2:
+        return None
+    coef = np.polyfit(wl[use] - x0, -(n[use] - 1) * np.pi, degree)
     rms = float(np.sqrt(np.mean((np.polyval(coef, x) - phi) ** 2)))
     return coef, rms, wl[keep], phi, kind[keep]
 
 
-def _vertex(coef, x0, lo, hi):
-    """Wavelength of the cubic's maximum inside [lo, hi], or NaN."""
+def _vertex(coef, x0, lo, hi, near=None):
+    """Wavelength of the polynomial's maximum inside [lo, hi], or NaN. A cubic has one; a
+    higher degree can have several, and the one closest to ``near`` (the λc extremum) is taken."""
     d = np.polyder(coef)
     roots = np.roots(d)
-    roots = roots[np.isreal(roots)].real + x0
+    roots = roots[np.abs(roots.imag) < 1e-9].real + x0
     roots = [r for r in roots if lo <= r <= hi and np.polyval(np.polyder(d), r - x0) < 0]
-    return float(roots[0]) if roots else float("nan")
+    if not roots:
+        return float("nan")
+    if near is None or len(roots) == 1:
+        return float(roots[0])
+    return float(min(roots, key=lambda r: abs(r - near)))
 
 
 def fit_phase(
@@ -131,8 +143,14 @@ def fit_phase(
     smooth_window: int = 11,
     candidates: int = 5,
     smoothed: np.ndarray | None = None,
+    degree: int = 3,
+    skip_inner: int = 0,
 ) -> PhaseFit | None:
     """Fit the SM1E.2 cubic phase model to one spectrum.
+
+    ``degree`` is the order of the polynomial through the numbered extrema (3 in the paper;
+    2, 4 and 5 are there to see what the choice does — see ``phase_compare.parameter_study``),
+    ``skip_inner`` the number of extremum pairs next to λc left out of the fit.
 
     ``lambda_c_guess`` (nm) is where λc is expected (e.g. the previous frame's
     value); without it, the extremum flanked by the widest spacings is used.
@@ -141,7 +159,7 @@ def fit_phase(
     lie on either side.
     """
     wl, kind = _ordered_extrema(wavelengths, spectrum, prominence, distance, smooth_window, smoothed)
-    if len(wl) < 6:
+    if len(wl) < max(6, degree + 3):
         return None
     x0 = float(np.mean([wavelengths.min(), wavelengths.max()]))
     if lambda_c_guess is None or not np.isfinite(lambda_c_guess):
@@ -152,7 +170,7 @@ def fit_phase(
 
     best = None
     for c in near:
-        res = _fit_with_center(wl, kind, int(c), x0)
+        res = _fit_with_center(wl, kind, int(c), x0, degree, skip_inner)
         if res is None:
             continue
         coef, rms, w_used, phi, k_used = res
@@ -165,7 +183,7 @@ def fit_phase(
     w_all = np.insert(w_used, c, wl[c])
     p_all = np.insert(phi.astype(float), c, np.nan)
     k_all = np.insert(k_used, c, kind[c])
-    lam_c = _vertex(coef, x0, float(wavelengths.min()), float(wavelengths.max()))
+    lam_c = _vertex(coef, x0, float(wavelengths.min()), float(wavelengths.max()), near=float(wl[c]))
     return PhaseFit(coefficients=coef, x0=x0, lambda_c=lam_c, rms=rms,
                     wavelengths=w_all, phases=p_all, kinds=k_all, center=c)
 
@@ -176,13 +194,15 @@ def phase_fits(
     prominence: float = 0.02,
     distance: int = 5,
     smooth_window: int = 11,
+    degree: int = 3,
+    skip_inner: int = 0,
 ) -> list[PhaseFit | None]:
     """:func:`fit_phase` for every spectrum; each frame's λc seeds the next."""
     fits, guess = [], lambda_c_guess
     smoothed = smooth(data.spectra, smooth_window)        # once for the run, not once per spectrum
     for i in range(len(data)):
         fit = fit_phase(data.wavelengths, data.spectra[i], guess, prominence, distance, smooth_window,
-                        smoothed=smoothed[i])
+                        smoothed=smoothed[i], degree=degree, skip_inner=skip_inner)
         fits.append(fit)
         if fit is not None and np.isfinite(fit.lambda_c):
             guess = fit.lambda_c
@@ -204,11 +224,24 @@ class LocalPhaseFit:
     phi_cubic: float           # the global cubic's value at lam, for comparison
     t1: float
     t2: float
-    coefficients: np.ndarray   # cubic in (λ − lam), highest power first
+    coefficients: np.ndarray   # polynomial in (λ − lam), highest power first
     window: tuple[float, float]
     rms: float                 # transmittance residual of the local fit
     n_points: int
     converged: bool
+    start: np.ndarray | None = None        # [t1, t2, *coefficients] before the fit (from the global fit)
+    rms_start: float = float("nan")        # transmittance residual of that starting model
+    t1_slope: float = 0.0                  # d t1/dλ and d t2/dλ across the window (``envelope=True``)
+    t2_slope: float = 0.0
+
+    def model(self, wl, start: bool = False) -> np.ndarray:
+        """The fitted two-mode model T(λ) (or, with ``start``, the model the fit started from)."""
+        x = np.asarray(wl, float) - self.lam
+        if start and self.start is not None:
+            a, b, c = self.start[0], self.start[1], self.start[2:]
+        else:
+            a, b, c = self.t1 + self.t1_slope * x, self.t2 + self.t2_slope * x, self.coefficients
+        return a * a + b * b + 2 * a * b * np.cos(np.polyval(c, x))
 
     @property
     def visibility(self) -> float:
@@ -265,9 +298,19 @@ def window_clearance(wavelengths: np.ndarray, fit: PhaseFit, lam: float,
     return float(abs(edge - fit.lambda_c) * abs(s_edge) / (2 * np.pi))
 
 
+LOCAL_ORDER = 3        # phase terms free in the local fit: φ0 … up to (λ − lam)^3 (the paper: all K_m)
+
+
 def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam: float,
-              cycles: float = LOCAL_CYCLES, smooth_window: int = 11) -> LocalPhaseFit | None:
+              cycles: float = LOCAL_CYCLES, smooth_window: int = 11, order: int = LOCAL_ORDER,
+              fit_powers: bool = True, envelope: bool = False) -> LocalPhaseFit | None:
     """Refine the intermodal phase at ``lam`` by fitting Eq. 1 to the spectrum around it.
+
+    ``order`` is the highest power of (λ − lam) whose phase coefficient is a free parameter:
+    0 = only the phase at ``lam``, 1 = + its slope (the local fringe period), 2 = + chirp,
+    3 = all four (the paper); the others stay at the global fit's values. ``fit_powers=False``
+    keeps t1 and t2 at their Eq. 9 starting values instead of fitting them. Both exist to measure
+    what each free parameter buys (``phase_compare.parameter_study``).
 
     The window is ``cycles`` local fringe periods wide (the period from the global cubic's
     slope at ``lam``), never less than one full cycle, and shrinks to one cycle when it would
@@ -304,22 +347,51 @@ def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam:
     if m.sum() < 12:
         return None
     xw, yw = wl[m] - lam, y[m]
-    # the global cubic re-centred at lam (Taylor expansion = polynomial shift)
-    d1, d2, d3 = (float(np.polyval(np.polyder(c, k), x_l)) for k in (1, 2, 3))
-    c0 = [d3 / 6.0, d2 / 2.0, d1, float(np.polyval(c, x_l))]       # highest power first
+    # the global polynomial re-centred at lam (Taylor expansion = polynomial shift)
+    deg = len(c) - 1
+    fact = 1.0
+    c0 = []
+    for k in range(deg + 1):                                       # lowest power first here
+        fact = fact * k if k else 1.0
+        c0.append(float(np.polyval(np.polyder(c, k), x_l)) / fact if k else float(np.polyval(c, x_l)))
+    c0 = c0[::-1]                                                  # highest power first
     ys = smooth(yw, smooth_window) if yw.size > smooth_window else yw
     t1, t2 = _t1_t2_from_extrema(float(ys.max()), float(ys.min()))
     if t2 <= 0:
         t2 = 0.05 * t1
 
     def model(p, x):
-        a, b = p[0], p[1]
-        return a * a + b * b + 2 * a * b * np.cos(np.polyval(p[2:], x))
+        a, b = p[0] + p[-2] * x, p[1] + p[-1] * x
+        return a * a + b * b + 2 * a * b * np.cos(np.polyval(p[2:-2], x))
 
-    p0 = np.array([t1, t2, *c0])
+    p0 = np.array([t1, t2, *c0, 0.0, 0.0])               # the last two: d t1/dλ, d t2/dλ
     rms0 = float(np.sqrt(np.mean((model(p0, xw) - yw) ** 2)))
-    res = least_squares(lambda p: model(p, xw) - yw, p0, method="lm", max_nfev=400)
-    coef = res.x[2:]
+    # free parameters: t1, t2 (unless fixed), the phase terms up to (λ − lam)^order and, with
+    # ``envelope``, the slopes of t1 and t2 across the window
+    free = np.zeros(p0.size, bool)
+    free[:2] = bool(fit_powers)
+    free[2 + max(deg - int(order), 0):-2] = True
+    free[-2:] = bool(envelope)
+
+    def full(q):
+        p = p0.copy()
+        p[free] = q
+        return p
+
+    powers = xw[:, None] ** np.arange(deg, -1, -1)[None, :]          # columns: x^deg … x^0
+
+    def jacobian(q):
+        p = full(q)
+        a, b = p[0] + p[-2] * xw, p[1] + p[-1] * xw
+        phi = np.polyval(p[2:-2], xw)
+        cos, sin = np.cos(phi), np.sin(phi)
+        da, db = 2 * a + 2 * b * cos, 2 * b + 2 * a * cos
+        jac = np.column_stack([da, db, (-2 * a * b * sin)[:, None] * powers, da * xw, db * xw])
+        return jac[:, free]
+
+    res = least_squares(lambda q: model(full(q), xw) - yw, p0[free], jac=jacobian, method="lm", max_nfev=400)
+    p_fit = full(res.x)
+    coef = p_fit[2:-2]
     rms = float(np.sqrt(np.mean(res.fun ** 2)))
     # A fit that ends worse than its starting point, or far from the cubic's phase, has slid to a
     # wrong solution (cos φ has mirror and 2π-shifted minima; seen on noisy SIMULATED runs where the
@@ -327,9 +399,10 @@ def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam:
     ok = (bool(res.success) and rms <= max(rms0, 1e-6) and rms <= 0.05
           and abs(float(coef[-1]) - c0[-1]) <= 1.0)
     return LocalPhaseFit(lam=float(lam), phi=float(coef[-1]), phi_cubic=float(c0[-1]),
-                         t1=float(abs(res.x[0])), t2=float(abs(res.x[1])), coefficients=coef,
+                         t1=float(abs(p_fit[0])), t2=float(abs(p_fit[1])), coefficients=coef,
                          window=(float(lo), float(hi)), rms=rms, n_points=int(m.sum()),
-                         converged=ok)
+                         converged=ok, start=p0[:-2], rms_start=rms0, t1_slope=float(p_fit[-2]),
+                         t2_slope=float(p_fit[-1]))
 
 
 def phase_series(
@@ -343,6 +416,9 @@ def phase_series(
     fits: list[PhaseFit | None] | None = None,
     local: bool = False,
     cycles: float = LOCAL_CYCLES,
+    order: int = LOCAL_ORDER,
+    fit_powers: bool = True,
+    envelope: bool = False,
 ) -> pd.DataFrame:
     """The SM1E.2 readout for every spectrum of a run.
 
@@ -378,8 +454,10 @@ def phase_series(
         row = [data.time[i], data.temperature[i], fit.lambda_c, pa, pb, abs(pb - pa), pb - pa,
                fit.rms, len(fit.wavelengths), between]
         if local:
-            la = local_fit(data.wavelengths, data.spectra[i], fit, lambda_a, cycles, smooth_window)
-            lb = local_fit(data.wavelengths, data.spectra[i], fit, lambda_b, cycles, smooth_window)
+            la = local_fit(data.wavelengths, data.spectra[i], fit, lambda_a, cycles, smooth_window,
+                           order, fit_powers, envelope)
+            lb = local_fit(data.wavelengths, data.spectra[i], fit, lambda_b, cycles, smooth_window,
+                           order, fit_powers, envelope)
             ok = la is not None and lb is not None and la.converged and lb.converged
             # both wavelengths refined, or neither: a refined φ carries a small systematic offset
             # against the cubic, and mixing one of each would put that offset into the readout
@@ -393,6 +471,66 @@ def phase_series(
                     ok]
         rows.append(row)
     return pd.DataFrame(rows, columns=cols)
+
+
+def wavelength_phase(
+    data: SpectraSet,
+    fits: list[PhaseFit | None],
+    lam: float,
+    local: bool = True,
+    cycles: float = LOCAL_CYCLES,
+    order: int = LOCAL_ORDER,
+    fit_powers: bool = True,
+    smooth_window: int = 11,
+    rows=None,
+    envelope: bool = False,
+) -> pd.DataFrame:
+    """The phase at ONE wavelength for every spectrum (or the given ``rows``): the building block
+    of a comparison between pairs — every pair made of N wavelengths needs N of these, not N².
+
+    Columns: frame, phi_cubic (the global fit's value), phi_local (the local two-mode fit's, NaN
+    where it was refused), local_ok, t1, t2, rms_local (transmittance), rms_start, clearance
+    (:func:`window_clearance`). :func:`pair_readout` turns two of them into a readout."""
+    idx = range(len(fits)) if rows is None else [int(r) for r in rows]
+    out = []
+    for i in idx:
+        fit = fits[i]
+        if fit is None:
+            out.append((i, np.nan, np.nan, False, np.nan, np.nan, np.nan, np.nan, np.nan))
+            continue
+        pc = float(fit.phase(lam))
+        lf = local_fit(data.wavelengths, data.spectra[i], fit, lam, cycles, smooth_window, order,
+                       fit_powers, envelope) if local else None
+        if lf is None:
+            out.append((i, pc, np.nan, False, np.nan, np.nan, np.nan, np.nan,
+                        window_clearance(data.wavelengths, fit, lam, cycles)))
+        else:
+            out.append((i, pc, lf.phi if lf.converged else np.nan, bool(lf.converged), lf.t1, lf.t2,
+                        lf.rms, lf.rms_start, window_clearance(data.wavelengths, fit, lam, cycles)))
+    return pd.DataFrame(out, columns=["frame", "phi_cubic", "phi_local", "local_ok", "t1", "t2",
+                                      "rms_local", "rms_start", "clearance"])
+
+
+def pair_readout(phase_a: pd.DataFrame, phase_b: pd.DataFrame) -> pd.DataFrame:
+    """Readout of a pair from two :func:`wavelength_phase` tables (same frames).
+
+    Columns: frame, cubic = the readout from the global fit, local = the same from the local fits
+    on the frames where both converged and the cubic's value elsewhere (the rule of
+    :func:`phase_series`: both wavelengths refined, or neither), local_ok, and the signed
+    differences cubic_signed / local_signed.
+
+    The readout is s·(φb − φa) with one sign s for the whole run, chosen so that it is positive
+    on most frames: the paper's |φb − φa| whenever the difference keeps its sign (always, for a
+    pair on one side of λc), but not folded back when it passes through zero — which a pair that
+    straddles λc can do (found 2026-11-22 on a SIMULATED run: 1485/1565 nm under a 22 rad tilt
+    came out as a V with 1.5 rad of "scatter")."""
+    ok = phase_a["local_ok"].to_numpy(bool) & phase_b["local_ok"].to_numpy(bool)
+    dc = phase_b["phi_cubic"].to_numpy(float) - phase_a["phi_cubic"].to_numpy(float)
+    dl = np.where(ok, phase_b["phi_local"].to_numpy(float) - phase_a["phi_local"].to_numpy(float), dc)
+    med = np.nanmedian(dc) if np.isfinite(dc).any() else 0.0
+    s = -1.0 if med < 0 else 1.0
+    return pd.DataFrame({"frame": phase_a["frame"].to_numpy(), "cubic": s * dc, "local": s * dl,
+                         "local_ok": ok, "cubic_signed": dc, "local_signed": dl})
 
 
 def scan_pairs(fits: list[PhaseFit | None], condition: np.ndarray, grid: np.ndarray) -> pd.DataFrame:

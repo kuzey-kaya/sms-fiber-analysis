@@ -33,6 +33,7 @@ python3 scripts/spectral_3d.py                     # fig18-19 3-D views (+ HTML 
 python3 scripts/make_movie.py                      # movie_run.gif: the run animated (Igor movie export)
 python3 scripts/phase_analysis.py                  # fig21-22 + phase CSVs: SM1E.2 phase-unwrapping readout
 python3 scripts/make_movie.py --phase              # movie_phase.gif: the phase readout animated
+python3 scripts/phase_compare.py --study           # fig24-26 + CSVs: wavelength pairs compared, fit-settings study
 ```
 Interactive app (FringeLab, draft): `python3 launch.py`, or double-click `run_app.bat` (Windows) /
 `run_app.command` (macOS); development: `streamlit run app.py`.
@@ -309,6 +310,62 @@ It is a continuous cooldown — no setpoint steps.
   labelling — our choice, not in the paper), `phase_fits`, `phase_series` (readout |φ(λb) − φ(λa)|,
   default 1545/1570 nm as in the paper), `phase_sensitivity`, `scan_pairs`, `tracked_phase_change`.
   Added 2026-10-07.
+- `sms_analysis/phase_compare.py` + the Phase tab's comparison (2026-11-22; the advisor through the
+  owner, from notes on paper: "in the Phase part, readout vs condition, compare different wavelengths
+  layered; one deviates more, one less — what is the effect of the curve fit; look into the details of
+  the curve-fit algorithm and play with its parameters; add a compare feature to the graphs that can
+  be compared; test different wavelength pairs").
+  Package: `phase.fit_phase(degree=3, skip_inner=0)` (polynomial through the extrema, λ±1 pair left
+  out; `_vertex(near=)` for degrees with several maxima), `phase.local_fit(cycles, order, fit_powers,
+  envelope)` — `order` = highest free phase term (0 phase only … 3 all, the paper), `fit_powers=False`
+  keeps t1, t2 at Eq. 9, `envelope=True` adds d t1/dλ, d t2/dλ; analytic Jacobian (3.3 → 1.8 s per pair
+  on the cooldown, same numbers); `LocalPhaseFit.model(wl, start=)`, `.start`, `.rms_start`;
+  `phase.wavelength_phase(data, fits, lam, …, rows=)` = one wavelength per call (N wavelengths give
+  every pair), `phase.pair_readout(pa, pb)` = s·(φb − φa) with one sign per run (|·| folds a pair that
+  straddles λc into a V when its difference passes zero — seen on a SIMULATED 22 rad tilt at
+  1485/1565); `phase_compare.readout_metrics` (slope, R², span, scatter, `bow`/`bow_pct` = largest gap
+  between the best parabola and the best line, `noise` = scatter about the parabola, robust
+  `frame_noise`, `plateau_noise` from `plateau_groups`, resolution), `compare_pairs` (readouts +
+  table, `gain` = cubic ÷ local scatter, `refined_pct`, `fit_rms`), `default_pairs`, `VARIANTS` (18:
+  defaults; degree 2/4/5; no λ±1; smoothing 5/21; prominence 0.01/0.05; window 1/1.5/3/4 cycles; order
+  0/1/2; t1,t2 fixed; t1,t2 sloped), `parameter_study` (one setting at a time, `slope_change_pct`,
+  `scatter_ratio`, `shift`), `study_summary`, `study_spread` (slope range over the settings with
+  ≥ 90 % refined and scatter ≤ 1.5× the default's).
+  App (Phase tab, top to bottom): expander *Curve-fit settings* (keys `phase_degree`,
+  `phase_skip_inner`, `phase_cycles`, `phase_order`, `phase_powers`, `phase_envelope`, button
+  `phase_reset`; a `st.warning` names what differs from the published method; `PHASE_DEFAULTS`; the
+  movie keeps the published settings), checkbox *Overlay another spectrum* on the profile figure
+  (`phase_prof_cmp_<key>`, `phase_prof_row_<key>`; caption = how far the profile moved at λa, λb),
+  expander *Compare wavelength pairs* (`st.data_editor` `phase_pairs_<key>` seeded from
+  `phase_pairs_init_<key>`, toggle `phase_cmp_on`, radios `phase_cmp_draw_<key>` = PAIR_DRAW (default
+  "Change from the first frame"), `phase_cmp_x_<key>` Condition/Time, `phase_cmp_method` PAIR_METHODS;
+  `wavelength_phase_cached` per wavelength with a progress bar; figures `phase_pairs`
+  (`pairs_compare_figure`: points against the condition, + means per load with error bars when the
+  condition has ≤ 40 values) and `phase_fit_effect` (`fit_effect_figure`); `pair_metrics_table`,
+  `pair_summary`), expander *Look inside the local fit* (`phase_inspect_<key>`, `local_fit_figure`,
+  `local_fit_table`, figure `phase_local_fit`), expander *What do the curve-fit settings change?*
+  (button `phase_study_run`, result in session state `phase_study_<key>` with a signature, first four
+  pairs of the table, 150 spectra; `study_figure` → `phase_study`). FindPeak tab: checkbox
+  `fp_<key>_cmp` draws FringeLab's tracker over the FindPeak curve (`igor_figure(compare=, name=)`).
+  CLI `scripts/phase_compare.py [--pairs a/b,c/d] [--study]` → fig24–26, `phase_pairs.csv`,
+  `phase_pairs_readouts.csv`, `phase_settings_study.csv`, `phase_settings_spread.csv`.
+  Findings (cooldown pairs 1545/1570, 1480/1505, 1480/1570, 1485/1565; strain 1565/1590, 1545/1570,
+  1455/1480, 1455/1590, 1470/1595): local-fit gain 3.6–9.6× (cooldown), 1.4–3.9× (strain); a pair the
+  local fit cannot refine (1540/1565 cooldown, 1545/1570 strain) keeps the cubic's 15–30 mrad; best
+  resolution 1485/1565 = 0.074 °C (1545/1570: 0.20 °C), strain 1470/1595 = 14 g (1565/1590: 21 g).
+  Profile/detection settings change the local-fit slope < 0.1 % on the cooldown (the polynomial only
+  seeds the local fit) but do change the cubic-only readout (strain: smoothing 21 halves its scatter,
+  smoothing 5 destroys it; degree 2 fails everywhere). Local settings matter: 2 cycles best, 1.5
+  cycles 2.5× the scatter, t1/t2 fixed → refused on 70–90 % of frames; slope spread across working
+  settings ±3.8 % (1545/1570), ±7.1 % (1480/1505), ±0.6–1.0 % (wide pairs) on the cooldown, ±8.9 %
+  (1565/1590) vs ±1.5 % (1455/1590) on the strain run — a systematic several times the statistical
+  ±0.2 mrad/°C. SIMULATED runs (also with a slightly non-cubic profile, q4 = 4e-8): every setting
+  recovers the slope within 0.1–2 %, and order 0/1 gives 5–10× less scatter than order 3 with 100 %
+  of frames refined; on real data order 0/1 shifts the slope 5–15 % and the envelope option does not
+  remove that (cooldown 1545/1570: −30.8 … −33.2 mrad/°C over order × envelope × 2–3 cycles) → the
+  spread comes from what the two-mode model leaves out; defaults unchanged. The envelope option at 3
+  cycles diverges (188 mrad) — an experiment, not a recommendation. Tests
+  `tests/test_phase_compare.py`, `test_app.py::test_phase_pairs_can_be_compared_and_the_fit_settings_changed`.
 - `sms_analysis/synthetic.py` — SIMULATED spectra (`simulate_run`): the real first-spectrum cubic
   (`REAL_PROFILE`, centred on 1525 nm) plus a known `common_rad` shift and a `tilt_rad` change of
   φ(λb) − φ(λa); returns the data and the true readout. Tests/validation only, never data.
@@ -570,7 +627,7 @@ SM1E.2 (phase unwrapping, wide dynamic range); Chen 2025 Optica Sensing JM4A.8 (
 ## Testing checklist before handing anything to the advisor
 
 `python -m pytest` (checks the numbers above automatically) → `python3 scripts/inspect_csv.py` →
-the scripts with no arguments → `ls figures` shows fig1–fig23 and the CSVs.
+the scripts with no arguments → `ls figures` shows fig1–fig26 and the CSVs.
 A strain run arrived 2026-10-17 and ships as `data/strain.csv` (the second example run in the app,
 `EXAMPLES` in app.py; added to the public repo on the owner's instruction 2026-10-17): 914 spectra, 1425–1625 nm at 0.2 nm, one every 3.6 s,
 55 min, columns temperature (21.7–22.7 °C, no load column) + time. Load is put on and taken off

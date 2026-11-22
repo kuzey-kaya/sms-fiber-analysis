@@ -271,6 +271,7 @@ plateaus (`fig9`), the legacy Colab tracker with its fringe-hop (`fig10`,
 ```bash
 python scripts/phase_analysis.py                              # 1545/1570 nm, the pair used in the paper
 python scripts/phase_analysis.py --lambda-a 1485 --lambda-b 1565
+python scripts/phase_compare.py --study                       # several pairs compared + the fit-settings study
 ```
 
 The method of the group's 2025 paper: in each spectrum the extrema are numbered
@@ -325,6 +326,67 @@ The Phase tab's expander *How much better is the local fit?* puts the two readou
 of the same frames and pair side by side — slope, R², scatter about the line,
 resolution, and (on a load-step run) the noise on the plateaus — with a figure of
 both readouts and their residuals, so the gain can be checked on any uploaded run.
+
+**Comparing wavelength pairs, and what the curve fit does** (2026-11-22). The
+Phase tab's box *Compare wavelength pairs* takes a small table of pairs (it
+starts with the pair in use, the paper's, its mirror image on the other side of
+λc, a pair across λc and the best pair of the cubic scan), fits every wavelength
+once, and draws all the readouts on one graph — as measured, as the change from
+the first spectrum, scaled so that each pair's own straight line runs from 0 to
+1, or as the deviation from that line — against the condition or against time,
+with the cubic alone, the local fit, or both. Under it a table (slope, R², span,
+scatter, *bow* = the smooth part of the deviation in % of the span, *noise* =
+what is left about a parabola, frame-to-frame noise, plateau noise, resolution,
+share of frames refined, gain of the local fit) and a bar chart of the scatter
+and the resolution per pair, cubic against local fit.
+*Curve-fit settings* opens the two fits to change — degree of the polynomial
+through the extrema (2–5), the λ±1 pair left out, width of the local window (1–4
+fringe cycles), which phase terms the local fit may move (phase only … all four),
+t1 and t2 fitted or fixed, t1 and t2 allowed to slope across the window — and
+*Look inside the local fit* shows, for any spectrum, the measured points around
+both wavelengths, the model the fit starts from and the fitted one, with their
+residuals. *What do the curve-fit settings change?* runs the readout once with
+the published settings and then with one setting changed at a time (18 runs on
+150 spectra, about a minute) and reports the slope and the scatter of every pair
+against the published settings, and how far each slope moves across the settings
+that still work. `python scripts/phase_compare.py [--pairs a/b,c/d] [--study]`
+does the same from the command line (fig24–26, `phase_pairs*.csv`,
+`phase_settings_*.csv`).
+
+What it shows on the two runs (cooldown: 1545/1570, 1480/1505, 1480/1570,
+1485/1565 nm; strain: 1565/1590, 1545/1570, 1455/1480, 1455/1590, 1470/1595 nm):
+
+- *Which pair deviates more is decided by whether the local fit can be applied.*
+  Where it can, the scatter about the line drops 3.6–9.6× on the cooldown (to
+  3–8 mrad) and 1.4–3.9× on the strain run; a pair with a wavelength whose window
+  would reach λc keeps the cubic's values and its 15–30 mrad of noise (1540/1565
+  on the cooldown, 1545/1570 on the strain run).
+- *Wide pairs across λc resolve best and are the most robust:* 1485/1565 nm gives
+  0.07 °C on the cooldown against 0.20 °C for 1545/1570; 1470/1595 nm gives 14 g
+  against 21 g for 1565/1590 on the strain run. Because such a pair's difference
+  can pass through zero, the comparison keeps its sign instead of taking |·|.
+- *The polynomial and the peak detection hardly matter once the local fit runs:*
+  degree 4 or 5, no λ±1 pair, smoothing 5–21 points, prominence 0.01–0.05 change
+  the local-fit slope by less than 0.1 % on the cooldown — the polynomial only
+  tells the local fit where to start. They do change the cubic-only readout
+  (smoothing 21 points halves its scatter on the noisy strain run, 5 points
+  destroys it there), and a parabola instead of a cubic fails outright.
+- *The local fit's own settings matter.* A 2-cycle window is the best compromise
+  (1 cycle is noisy, 1.5 ties the phase to the mode powers, 3–4 reach λc or the
+  band edge); t1 and t2 must be fitted (fixed, the fit is refused on 70–90 % of
+  the spectra). The number of free phase terms moves the slope: across the
+  settings that still work the slope spreads by ±3.8 % (1545/1570) and ±7.1 %
+  (1480/1505) on the cooldown but only ±0.6–1.0 % for the wide pairs, and by
+  ±8.9 % for 1565/1590 against ±1.5 % for 1455/1590 on the strain run. That
+  spread is a systematic uncertainty several times larger than the statistical
+  ± of a single fit, and the reason to prefer a wide pair.
+- *On SIMULATED runs with a known answer every setting recovers the slope*
+  (within 0.1 % at the cooldown's noise, 2 % at the strain run's), and letting
+  only the phase and the fringe period move gives 5–10× less scatter than all
+  four terms. On the real runs the same choice shifts the slope by 5–15 %, and
+  letting t1 and t2 slope across the window does not remove the shift — so the
+  spread on real data comes from what the two-mode model leaves out, and the
+  published settings stay the default.
 
 **Is the implementation right?** Four checks, all in `tests/test_phase.py`:
 
@@ -409,6 +471,11 @@ python scripts/spectral_3d.py      # fig18-19: 3-D views (+ interactive HTML wit
 | `phase_pair_scan.csv` | temperature sensitivity, R², scatter and resolution of the readout for every wavelength pair on a 5 nm grid |
 | `phase_vs_tracking.csv` | phase change implied by peak tracking, per fringe (common part + tilt) |
 | `fig23_phase_validation.png` / `phase_validation.csv` | **SIMULATED** check of the phase readout against a known answer, four scenarios (`scripts/validate_phase.py`) |
+| `fig24_phase_pairs.png` | several wavelength pairs on one graph: change from the first spectrum and deviation from each pair's straight line, cubic alone (open) and with the local fit (filled) (`scripts/phase_compare.py`) |
+| `fig25_phase_fit_effect.png` | scatter about the line and resolution per pair, cubic against local fit |
+| `fig26_phase_settings.png` | one fit setting changed at a time: slope and scatter of every pair against the published settings (`scripts/phase_compare.py --study`) |
+| `phase_pairs.csv` / `phase_pairs_readouts.csv` | the comparison's numbers per pair and method / both readouts of every pair per spectrum |
+| `phase_settings_study.csv` / `phase_settings_spread.csv` | every pair, method and setting of the study / how far each pair's slope moves across the settings that still work |
 | `movie_phase.gif` / `.mp4` | the phase-unwrapping readout animated (`scripts/make_movie.py --phase`) |
 | `movie_run.gif` / `.mp4` | the run animated: spectrum + extrema per frame, map with time cursor, tracked fringe growing (`scripts/make_movie.py`) |
 | `fig20_calibration_models.png` | linear vs quadratic calibration of the detailed fringe with both residual series (`run_analysis.py`) |
