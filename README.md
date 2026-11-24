@@ -345,7 +345,13 @@ fringe cycles), which phase terms the local fit may move (phase only … all fou
 t1 and t2 fitted or fixed, t1 and t2 allowed to slope across the window — and
 *Look inside the local fit* shows, for any spectrum, the measured points around
 both wavelengths, the model the fit starts from and the fitted one, with their
-residuals. *What do the curve-fit settings change?* runs the readout once with
+residuals, and how the fit ended. Neither fit runs for a set number of iterations:
+the polynomial is linear least squares, solved in one step; the local fit is
+Levenberg–Marquardt (scipy `least_squares`, MINPACK), which stops by itself when
+another step would improve the sum of squares by less than one part in 10⁸ — on
+both runs after 4–9 evaluations of the model (median 7), never at the ceiling of
+400. The three readout graphs (against time, against the condition, λc against
+the condition) are separate graphs, each with its own picture and data export. *What do the curve-fit settings change?* runs the readout once with
 the published settings and then with one setting changed at a time (18 runs on
 150 spectra, about a minute) and reports the slope and the scatter of every pair
 against the published settings, and how far each slope moves across the settings

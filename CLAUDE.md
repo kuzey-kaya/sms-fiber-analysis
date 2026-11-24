@@ -366,6 +366,22 @@ It is a continuous cooldown — no setpoint steps.
   spread comes from what the two-mode model leaves out; defaults unchanged. The envelope option at 3
   cycles diverges (188 mrad) — an experiment, not a recommendation. Tests
   `tests/test_phase_compare.py`, `test_app.py::test_phase_pairs_can_be_compared_and_the_fit_settings_changed`.
+  2026-11-24 (owner: "the three graphs given together in the Phase part must be exportable one by
+  one; and what does the curve fit do — does it stop at a number of iterations or where?"). The
+  readout figure was one Plotly figure with three panels, so its picture and CSV came as one →
+  three figures, `phase_readout_time_figure` (name `phase_readout`), `phase_readout_condition_figure`
+  (`phase_readout_condition`) and `lambda_c_figure` (`phase_lambda_c`), the last two side by side,
+  each through `show_figure`; `phase_readout_figure` is gone. The other multi-panel figures
+  (profile, cubic vs local, local-fit inspector, fit effect, settings study) are still one picture
+  each. How the fits stop: the profile is `np.polyfit` — linear least squares, solved in one step, no
+  iteration (5 λc candidates tried, the best-fitting kept). The local fit is scipy
+  `least_squares(method="lm")` = MINPACK's Levenberg–Marquardt with our analytic Jacobian, tolerances
+  at scipy's defaults ftol = xtol = gtol = 1e-8, ceiling `phase.MAX_EVALUATIONS` = 400 model
+  evaluations. Measured on both runs (6 576 fits, eight wavelengths): every fit stopped on a tolerance
+  (ftol, sometimes ftol and xtol together) after 4–9 evaluations, median 7; none reached the ceiling.
+  `LocalPhaseFit.nfev` / `.stop` (`phase.STOP_REASONS`) carry it, and the inspector's table shows
+  "model evaluations" and "stopped because". After the fit our own acceptance test decides whether the
+  frame uses it (RMS not above the start's, ≤ 0.05, phase moved ≤ 1 rad).
 - `sms_analysis/synthetic.py` — SIMULATED spectra (`simulate_run`): the real first-spectrum cubic
   (`REAL_PROFILE`, centred on 1525 nm) plus a known `common_rad` shift and a `tilt_rad` change of
   φ(λb) − φ(λa); returns the data and the true readout. Tests/validation only, never data.

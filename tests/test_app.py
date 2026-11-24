@@ -319,6 +319,10 @@ def test_phase_pairs_can_be_compared_and_the_fit_settings_changed():
     paper = table[(table["pair (nm)"] == "1545/1570") & (table["phase from"] == "local fit")].iloc[0]
     assert paper["gain (×)"] > 3 and paper["refined (%)"] == 100
     assert any("Finest resolution" in m.value for m in at.markdown)
+    # 2026-11-24: the readout's three graphs are three graphs, each with its own export row
+    csv_ids = " ".join(b.proto.id for b in at.get("download_button") if b.label == "Data (CSV)")
+    for name in ("phase_readout", "phase_readout_condition", "phase_lambda_c", "phase_pairs", "phase_fit_effect"):
+        assert f"fig_{name}_csv" in csv_ids, name
     draw = [r for r in at.radio if r.key and r.key.startswith("phase_cmp_draw")][0]
     draw.set_value(draw.options[3]).run()                            # deviation from the straight line
     assert not at.exception, [str(e.value) for e in at.exception]

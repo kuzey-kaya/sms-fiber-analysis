@@ -233,6 +233,8 @@ class LocalPhaseFit:
     rms_start: float = float("nan")        # transmittance residual of that starting model
     t1_slope: float = 0.0                  # d t1/dλ and d t2/dλ across the window (``envelope=True``)
     t2_slope: float = 0.0
+    nfev: int = 0                          # times the model was evaluated before the fit stopped
+    stop: str = ""                         # why it stopped (one of STOP_REASONS)
 
     def model(self, wl, start: bool = False) -> np.ndarray:
         """The fitted two-mode model T(λ) (or, with ``start``, the model the fit started from)."""
@@ -299,6 +301,20 @@ def window_clearance(wavelengths: np.ndarray, fit: PhaseFit, lam: float,
 
 
 LOCAL_ORDER = 3        # phase terms free in the local fit: φ0 … up to (λ − lam)^3 (the paper: all K_m)
+MAX_EVALUATIONS = 400  # ceiling on model evaluations per local fit; a fit that reaches it has not converged
+
+# Why scipy's Levenberg–Marquardt (MINPACK lmder) stops, by its status code. The tolerances are
+# scipy's defaults, 1e-8. Measured 2026-11-24 on both runs (6 576 fits at eight wavelengths): every
+# fit stopped on a tolerance — the sum of squares no longer improving — after 4–9 evaluations
+# (median 7); none came near the ceiling.
+STOP_REASONS = {
+    -1: "error in the fit routine",
+    0: f"the ceiling of {MAX_EVALUATIONS} evaluations was reached (not converged)",
+    1: "the gradient vanished (gtol 1e-8)",
+    2: "the sum of squares stopped improving (ftol 1e-8)",
+    3: "the parameters stopped moving (xtol 1e-8)",
+    4: "sum of squares and parameters both stopped changing (ftol and xtol 1e-8)",
+}
 
 
 def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam: float,
@@ -389,7 +405,8 @@ def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam:
         jac = np.column_stack([da, db, (-2 * a * b * sin)[:, None] * powers, da * xw, db * xw])
         return jac[:, free]
 
-    res = least_squares(lambda q: model(full(q), xw) - yw, p0[free], jac=jacobian, method="lm", max_nfev=400)
+    res = least_squares(lambda q: model(full(q), xw) - yw, p0[free], jac=jacobian, method="lm",
+                        max_nfev=MAX_EVALUATIONS)
     p_fit = full(res.x)
     coef = p_fit[2:-2]
     rms = float(np.sqrt(np.mean(res.fun ** 2)))
@@ -402,7 +419,8 @@ def local_fit(wavelengths: np.ndarray, spectrum: np.ndarray, fit: PhaseFit, lam:
                          t1=float(abs(p_fit[0])), t2=float(abs(p_fit[1])), coefficients=coef,
                          window=(float(lo), float(hi)), rms=rms, n_points=int(m.sum()),
                          converged=ok, start=p0[:-2], rms_start=rms0, t1_slope=float(p_fit[-2]),
-                         t2_slope=float(p_fit[-1]))
+                         t2_slope=float(p_fit[-1]), nfev=int(res.nfev),
+                         stop=STOP_REASONS.get(int(res.status), f"status {res.status}"))
 
 
 def phase_series(

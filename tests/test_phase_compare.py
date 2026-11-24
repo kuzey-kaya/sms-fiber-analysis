@@ -96,6 +96,8 @@ def test_the_fit_options_default_to_the_published_fit(data, fits):
     same = local_fit(wl, y, f0, 1570.0, order=3, fit_powers=True, envelope=False)
     assert ref.phi == same.phi and ref.rms == same.rms
     assert ref.rms < ref.rms_start                                 # the fit improves on where it starts
+    # it stops by itself on a tolerance after a handful of evaluations, far below the ceiling
+    assert 3 <= ref.nfev <= 30 and "1e-8" in ref.stop and "ceiling" not in ref.stop
     np.testing.assert_allclose(ref.model(wl[500:510], start=True),
                                ref.start[0] ** 2 + ref.start[1] ** 2 + 2 * ref.start[0] * ref.start[1]
                                * np.cos(np.polyval(ref.start[2:], wl[500:510] - 1570.0)))

@@ -441,45 +441,56 @@ def phase_compare_figure(series, cond_title, unit):
     return fig
 
 
-def phase_readout_figure(series, sens, la, lb, has_cond, cond_title):
-    """Readout vs time (Igor colours), vs the condition with its fit, and λc vs the condition."""
-    # time on its own full-width row (it has two y-axes), the two condition plots below it
-    if has_cond:
-        fig = make_subplots(rows=2, cols=2, specs=[[{"colspan": 2, "secondary_y": True}, None], [{}, {}]],
-                            subplot_titles=("Readout and condition vs time", "Readout vs condition",
-                                            "λc vs condition"),
-                            vertical_spacing=0.2, horizontal_spacing=0.12)
-    else:
-        fig = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]],
-                            subplot_titles=("Readout vs time",))
+def phase_readout_time_figure(series, la, lb, has_cond, cond_title):
+    """The readout (red, left) and the condition (blue, right) against time, in Igor's colours."""
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Scatter(x=series["time"], y=series["phase_diff"], mode="lines", name="readout",
-                             line=dict(color=RED, width=1.4)), row=1, col=1, secondary_y=False)
-    fig.update_yaxes(title_text=f"|φ({lb:g}) − φ({la:g})| (rad)", color=RED, row=1, col=1, secondary_y=False)
-    fig.update_xaxes(title_text="Time (s)", row=1, col=1)
+                             line=dict(color=RED, width=1.4)), secondary_y=False)
+    fig.update_yaxes(title_text=f"|φ({lb:g}) − φ({la:g})| (rad)", color=RED, secondary_y=False)
+    fig.update_xaxes(title_text="Time (s)")
     if has_cond:
         fig.add_trace(go.Scatter(x=series["time"], y=series["temperature"], mode="lines", name=cond_title,
-                                 line=dict(color=BLUE, width=1.4)), row=1, col=1, secondary_y=True)
-        fig.update_yaxes(title_text=cond_title, color=BLUE, showgrid=False, row=1, col=1, secondary_y=True)
-        ok = series.dropna(subset=["phase_diff", "temperature"])
+                                 line=dict(color=BLUE, width=1.4)), secondary_y=True)
+        fig.update_yaxes(title_text=cond_title, color=BLUE, showgrid=False, secondary_y=True)
+    fig.update_layout(height=400, margin=dict(l=10, r=10, t=50, b=10),
+                      title_text="Readout and condition vs time" if has_cond else "Readout vs time",
+                      legend=dict(orientation="h", y=-0.22, x=0))
+    return fig
+
+
+def phase_readout_condition_figure(series, sens, la, lb, cond_title):
+    """The readout of every frame against the condition, with its straight fit."""
+    fig = go.Figure()
+    ok = series.dropna(subset=["phase_diff", "temperature"])
+    fig.add_trace(go.Scatter(x=ok["temperature"], y=ok["phase_diff"], mode="markers", name="frames",
+                             marker=dict(size=4, color=PEAK_COLOR, opacity=0.5)))
+    if sens is not None and len(ok):
         t = np.linspace(ok["temperature"].min(), ok["temperature"].max(), 50)
-        fig.add_trace(go.Scatter(x=ok["temperature"], y=ok["phase_diff"], mode="markers", name="frames",
-                                 marker=dict(size=4, color=PEAK_COLOR, opacity=0.5)), row=2, col=1)
-        if sens is not None:
-            fig.add_trace(go.Scatter(x=t, y=sens.slope * t + sens.intercept, mode="lines",
-                                     name=f"{sens.slope * 1e3:+.1f} mrad per unit, R² {sens.r_squared:.4f}",
-                                     line=dict(color="#333333", width=2)), row=2, col=1)
-        okc = ok.dropna(subset=["lambda_c"])
+        fig.add_trace(go.Scatter(x=t, y=sens.slope * t + sens.intercept, mode="lines",
+                                 name=f"{sens.slope * 1e3:+.1f} mrad per unit, R² {sens.r_squared:.4f}",
+                                 line=dict(color="#333333", width=2)))
+    fig.update_xaxes(title_text=cond_title)
+    fig.update_yaxes(title_text=f"|φ({lb:g}) − φ({la:g})| (rad)")
+    fig.update_layout(height=400, margin=dict(l=10, r=10, t=50, b=10), title_text="Readout vs condition",
+                      legend=dict(orientation="h", y=-0.22, x=0))
+    return fig
+
+
+def lambda_c_figure(series, cond_title):
+    """The critical wavelength (the maximum of the phase profile) against the condition."""
+    fig = go.Figure()
+    okc = series.dropna(subset=["lambda_c", "temperature"])
+    fig.add_trace(go.Scatter(x=okc["temperature"], y=okc["lambda_c"], mode="markers", name="λc",
+                             marker=dict(size=4, color=DIP_COLOR, opacity=0.5)))
+    if len(okc) >= 3 and np.ptp(okc["temperature"].to_numpy(float)):
+        t = np.linspace(okc["temperature"].min(), okc["temperature"].max(), 50)
         k = np.polyfit(okc["temperature"], okc["lambda_c"], 1)
-        fig.add_trace(go.Scatter(x=okc["temperature"], y=okc["lambda_c"], mode="markers", name="λc",
-                                 marker=dict(size=4, color=DIP_COLOR, opacity=0.5)), row=2, col=2)
         fig.add_trace(go.Scatter(x=t, y=np.polyval(k, t), mode="lines", name=f"λc {k[0] * 1e3:+.1f} pm per unit",
-                                 line=dict(color="#333333", width=2, dash="dot")), row=2, col=2)
-        fig.update_xaxes(title_text=cond_title, row=2, col=1)
-        fig.update_xaxes(title_text=cond_title, row=2, col=2)
-        fig.update_yaxes(title_text="Readout (rad)", row=2, col=1)
-        fig.update_yaxes(title_text="λc (nm)", row=2, col=2)
-    fig.update_layout(height=760 if has_cond else 420, margin=dict(l=10, r=10, t=40, b=10),
-                      legend=dict(orientation="h", y=-0.12, x=0))
+                                 line=dict(color="#333333", width=2, dash="dot")))
+    fig.update_xaxes(title_text=cond_title)
+    fig.update_yaxes(title_text="λc (nm)")
+    fig.update_layout(height=400, margin=dict(l=10, r=10, t=50, b=10), title_text="λc vs condition",
+                      legend=dict(orientation="h", y=-0.22, x=0))
     return fig
 
 
@@ -674,7 +685,8 @@ def local_fit_table(fits_ab) -> pd.DataFrame:
                      "t1": lf.t1, "t2": lf.t2, "visibility": lf.visibility,
                      "φ from the profile (rad)": lf.phi_cubic, "φ fitted (rad)": lf.phi,
                      "change (mrad)": (lf.phi - lf.phi_cubic) * 1e3,
-                     "RMS start (×10⁻³)": lf.rms_start * 1e3, "RMS fitted (×10⁻³)": lf.rms * 1e3})
+                     "RMS start (×10⁻³)": lf.rms_start * 1e3, "RMS fitted (×10⁻³)": lf.rms * 1e3,
+                     "model evaluations": lf.nfev, "stopped because": lf.stop})
     return pd.DataFrame(rows)
 
 
@@ -2662,7 +2674,13 @@ with tab_phase:
                                                     smooth_flatten, _plat))
         st.caption(f"Readout drawn as {_drawn.replace('as tracked', 'fitted frame by frame')} "
                    "(*Smooth the drawn lines* in the sidebar); the fit and the numbers above use every frame.")
-        show_figure(phase_readout_figure(ser_d, sens_p, la, lb, has_cond, cond_title), "phase_readout")
+        # three graphs, not three panels of one: each has its own picture and its own data file
+        show_figure(phase_readout_time_figure(ser_d, la, lb, has_cond, cond_title), "phase_readout")
+        if has_cond:
+            rc = st.columns(2)
+            show_figure(phase_readout_condition_figure(ser_d, sens_p, la, lb, cond_title),
+                        "phase_readout_condition", rc[0])
+            show_figure(lambda_c_figure(ser_d, cond_title), "phase_lambda_c", rc[1])
         if has_cond and "phase_diff_cubic" in ser_local:
             with st.expander("Cubic vs local fit on this run · same frames, same pair",
                              expanded=True, icon=":material/compare:"):
@@ -2793,7 +2811,12 @@ with tab_phase:
                 st.caption("Grey dashed: the two-mode model with the phase taken from the profile and t1, t2 from "
                            "the nearest maximum and minimum — where the fit starts. Red: after the least-squares "
                            "fit of the free parameters chosen in *Curve-fit settings*. The fitted phase at the "
-                           "dotted line is what enters the readout. A fit is not accepted when it ends worse than "
+                           "dotted line is what enters the readout. The fit is not run for a fixed number of "
+                           "iterations: each step changes the free parameters to lower the sum of squared "
+                           "differences between model and data, and it stops by itself when another step would "
+                           "improve that sum by less than one part in 10⁸ (the last two columns; typically after "
+                           "6–8 evaluations of the model — the ceiling of 400 is a safety net that is not reached). "
+                           "A fit is not accepted when it ends worse than "
                            "it started, leaves more than 0.05 in transmittance, or moves the phase by more than "
                            "1 rad; the frame then keeps the profile's values for both wavelengths.")
         if has_cond:
