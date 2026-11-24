@@ -10,3 +10,4 @@ imageio-ffmpeg>=0.4.9    # ships an ffmpeg binary: MP4 movie export without a sy
 # rebuild marker 2026-11-22: sms_analysis.steps gained is_step_run (Streamlit Cloud keeps old modules in memory)
 # rebuild marker 2026-11-22 (2): sms_analysis.phase gained wavelength_phase / pair_readout, new sms_analysis.phase_compare
 # rebuild marker 2026-11-24: sms_analysis.phase gained STOP_REASONS / LocalPhaseFit.nfev
+# rebuild marker 2026-11-24 (2): sms_analysis.phase.phase_series changed (sign of the readout)
