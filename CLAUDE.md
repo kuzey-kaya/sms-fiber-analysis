@@ -382,6 +382,17 @@ It is a continuous cooldown — no setpoint steps.
   `LocalPhaseFit.nfev` / `.stop` (`phase.STOP_REASONS`) carry it, and the inspector's table shows
   "model evaluations" and "stopped because". After the fit our own acceptance test decides whether the
   frame uses it (RMS not above the start's, ≤ 0.05, phase moved ≤ 1 rad).
+  Same day (owner: the mail answers the advisor's "any other bug?" — explain that bug too): the fold
+  of |φb − φa| was fixed on 2026-11-22 in `pair_readout` only; `phase_series` (the tab's own readout,
+  the script, the movie) still took the absolute value frame by frame. It is reachable on real data:
+  on the cooldown φ(1565) − φ(1480) is on the other side of zero on 322 of 730 spectra (3 of the 171
+  pairs of the 5 nm grid change sign there, 10 of 741 on the strain run — all pairs across λc with
+  nearly equal phases, or both wavelengths next to λc). Folded, 1480/1565 read +41.5 mrad/°C with
+  R² 0.63; with one sign for the run (the median's) it is −79.4 mrad/°C, R² 0.9998. `phase_series`
+  now does that for `phase_diff` and `phase_diff_cubic`; pairs on one side of λc are unchanged (the
+  paper's |·| exactly; 1485/1565 never crossed, so the published numbers stand). The tab shows an
+  info box when the chosen pair's difference passes through zero. Test
+  `test_phase.py::test_a_pair_across_lambda_c_is_not_folded_into_a_v`.
 - `sms_analysis/synthetic.py` — SIMULATED spectra (`simulate_run`): the real first-spectrum cubic
   (`REAL_PROFILE`, centred on 1525 nm) plus a known `common_rad` shift and a `tilt_rad` change of
   φ(λb) − φ(λa); returns the data and the true readout. Tests/validation only, never data.

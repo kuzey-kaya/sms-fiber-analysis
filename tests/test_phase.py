@@ -96,3 +96,18 @@ def test_window_clearance_separates_the_strain_1560_case_from_the_cooldown_pair(
     c1545 = [window_clearance(d0.wavelengths, f0[i], 1545.0) for i in np.linspace(0, len(d0) - 1, 24).astype(int)
              if f0[i] is not None]
     assert min(c1545) >= EDGE_CLEARANCE
+
+
+def test_a_pair_across_lambda_c_is_not_folded_into_a_v(data, fits):
+    """2026-11-24: φ(1565) − φ(1480) passes through zero on the cooldown (322 of 730 spectra on the
+    other side). With |·| the readout came out as a V with a meaningless slope; taken with one sign
+    for the run it is the straight line it should be. A pair on one side is unchanged."""
+    s = phase_series(data, 1480.0, 1565.0, fits=fits)
+    signed = s["phase_diff_signed"].to_numpy()
+    assert 100 < (signed > 0).sum() < 630                               # it really changes sign
+    folded = phase_sensitivity(s.assign(phase_diff=np.abs(signed)))
+    straight = phase_sensitivity(s)
+    assert straight.r_squared > 0.99 and folded.r_squared < 0.9
+    assert abs(straight.slope) * 1e3 == pytest.approx(81.0, abs=3.0)
+    one_side = phase_series(data, fits=fits)                              # 1545/1570: the paper's |.|
+    np.testing.assert_allclose(one_side["phase_diff"], np.abs(one_side["phase_diff_signed"]))

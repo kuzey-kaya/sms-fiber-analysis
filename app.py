@@ -2628,6 +2628,12 @@ with tab_phase:
                              phase_diff=ser["phase_diff_cubic"],
                              phase_diff_signed=ser["phi_b_cubic"] - ser["phi_a_cubic"])
         n_fit = int(ser["phase_diff"].notna().sum())
+        signs_p = np.sign(ser["phase_diff_signed"].dropna().to_numpy(float))
+        if signs_p.size and 0 < (signs_p < 0).sum() < signs_p.size:
+            st.info(f"φ({lb:g}) − φ({la:g}) passes through zero during this run (the two wavelengths lie on "
+                    "opposite sides of λc and have nearly the same phase). The readout below is that difference "
+                    "with its sign, not its absolute value — the absolute value would fold a straight response "
+                    "into a V.", icon=":material/info:")
         sens_p = None
         if has_cond and n_fit >= 3:
             try:

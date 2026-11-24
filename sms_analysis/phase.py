@@ -442,7 +442,8 @@ def phase_series(
 
     Columns: time, temperature, lambda_c (nm), phi_a, phi_b (rad, relative to
     each frame's λ±1 pair), phase_diff = |φ(λb) − φ(λa)| (rad, the paper's
-    plotted quantity), phase_diff_signed, rms (rad, cubic-fit residual),
+    plotted quantity; taken with one sign for the whole run, so a difference that
+    passes through zero is not folded back), phase_diff_signed, rms (rad, cubic-fit residual),
     n_extrema, extrema_between (number of extrema detected between λa and λb;
     |phase_diff|/π should stay within about one of it).
     Pass ``fits`` (from :func:`phase_fits`) to reuse them for another pair.
@@ -488,7 +489,19 @@ def phase_series(
                     if (la is not None or lb is not None) else np.nan,
                     ok]
         rows.append(row)
-    return pd.DataFrame(rows, columns=cols)
+    out = pd.DataFrame(rows, columns=cols)
+    # One sign for the whole run instead of |·| frame by frame. For a pair on one side of λc the
+    # difference never changes sign and this is the paper's |φb − φa| exactly; for a pair that
+    # straddles λc it can pass through zero, and the absolute value then folds a straight response
+    # into a V (2026-11-24: 1480/1565 nm on the cooldown is on the other side of zero on 322 of 730
+    # spectra; 3 of 171 pairs of the 5 nm grid do it there, 10 of 741 on the strain run).
+    cubic_signed = (out["phi_b_cubic"] - out["phi_a_cubic"]) if local else out["phase_diff_signed"]
+    med = np.nanmedian(cubic_signed.to_numpy(float)) if cubic_signed.notna().any() else 0.0
+    sign = -1.0 if med < 0 else 1.0
+    out["phase_diff"] = sign * out["phase_diff_signed"]
+    if local:
+        out["phase_diff_cubic"] = sign * cubic_signed
+    return out
 
 
 def wavelength_phase(

@@ -369,8 +369,11 @@ What it shows on the two runs (cooldown: 1545/1570, 1480/1505, 1480/1570,
   on the cooldown, 1545/1570 on the strain run).
 - *Wide pairs across λc resolve best and are the most robust:* 1485/1565 nm gives
   0.07 °C on the cooldown against 0.20 °C for 1545/1570; 1470/1595 nm gives 14 g
-  against 21 g for 1565/1590 on the strain run. Because such a pair's difference
-  can pass through zero, the comparison keeps its sign instead of taking |·|.
+  against 21 g for 1565/1590 on the strain run. Such a pair's difference can pass
+  through zero, and |φb − φa| then folds a straight response into a V: on the
+  cooldown 1480/1565 nm read +41 mrad/°C with R² 0.63 that way, and −79 mrad/°C
+  with R² 0.9998 once the difference keeps one sign for the whole run — which is
+  what the readout does since 2026-11-24 (pairs on one side of λc are unchanged).
 - *The polynomial and the peak detection hardly matter once the local fit runs:*
   degree 4 or 5, no λ±1 pair, smoothing 5–21 points, prominence 0.01–0.05 change
   the local-fit slope by less than 0.1 % on the cooldown — the polynomial only
